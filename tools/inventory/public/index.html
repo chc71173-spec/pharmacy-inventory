@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>藥品庫存</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --card: #1a1d24;
+      --line: #2a2f3a;
+      --text: #e7e9ee;
+      --muted: #8b93a1;
+      --accent: #ff8c42;
+      --danger: #e74c3c;
+      --warn: #f1c40f;
+      --ok: #2ecc71;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 15px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      background: var(--card);
+      border-bottom: 1px solid var(--line);
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }
+    header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+    header h1 .accent { color: var(--accent); }
+    .user-info { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      padding: 9px 14px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+    button:active { transform: scale(0.97); }
+
+    nav {
+      display: flex;
+      background: var(--card);
+      border-bottom: 1px solid var(--line);
+    }
+    nav button {
+      flex: 1;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 0;
+      padding: 12px 0;
+      font-size: 14px;
+      border-bottom: 2px solid transparent;
+    }
+    nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    main { padding: 16px; padding-bottom: 80px; }
+    .view { display: none; }
+    .view.active { display: block; }
+
+    .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+    .login-box {
+      max-width: 340px;
+      margin: 80px auto;
+      text-align: center;
+      padding: 32px 24px;
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid var(--line);
+    }
+    .login-box h2 { margin-top: 0; }
+    .login-box p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+    th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    tr:last-child td { border-bottom: 0; }
+    td.qty { text-align: right; font-variant-numeric: tabular-nums; }
+    td.expiry { font-variant-numeric: tabular-nums; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .badge.danger { background: rgba(231, 76, 60, 0.18); color: var(--danger); }
+    .badge.warn { background: rgba(241, 196, 15, 0.18); color: var(--warn); }
+    .badge.ok { background: rgba(46, 204, 113, 0.18); color: var(--ok); }
+    .badge.expired { background: var(--danger); color: #fff; }
+
+    .delete-btn {
+      background: transparent;
+      color: var(--danger);
+      padding: 4px 8px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+    }
+
+    form { background: var(--card); padding: 16px; border-radius: 8px; }
+    label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 12px; }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 15px;
+    }
+    input:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .submit-btn { width: 100%; padding: 12px; font-size: 15px; }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .stat {
+      background: var(--card);
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+      border: 1px solid var(--line);
+    }
+    .stat .num { font-size: 22px; font-weight: 600; }
+    .stat .label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .stat.danger .num { color: var(--danger); }
+    .stat.warn .num { color: var(--warn); }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--card);
+      padding: 12px 20px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-size: 14px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      z-index: 100;
+    }
+    .toast.show { opacity: 1; }
+    .toast.error { border-color: var(--danger); color: var(--danger); }
+
+    .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    .upload-zone {
+      border: 2px dashed var(--line);
+      border-radius: 10px;
+      padding: 28px 16px;
+      text-align: center;
+      background: var(--card);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .upload-zone.dragover { border-color: var(--accent); background: rgba(255, 140, 66, 0.08); }
+    .upload-zone p { margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+    .upload-zone strong { color: var(--accent); }
+    .upload-zone input[type=file] { display: none; }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .toolbar button { font-size: 13px; padding: 7px 12px; }
+
+    .preview-summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .preview-summary .stat .num { font-size: 18px; }
+    .stat.ok .num { color: var(--ok); }
+    .stat.merge .num { color: var(--warn); }
+
+    tr.row-error td { background: rgba(231, 76, 60, 0.08); }
+    tr.row-merge td { background: rgba(241, 196, 15, 0.06); }
+    .err-msg { color: var(--danger); font-size: 11px; }
+
+    @media (max-width: 480px) {
+      th, td { padding: 8px; font-size: 13px; }
+      th { font-size: 11px; }
+      header h1 { font-size: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="login-screen" class="login-box" style="display: none;">
+    <h2>💊 藥品庫存</h2>
+    <p>請使用授權的 Google 帳號登入</p>
+    <button id="btn-login" style="width: 100%;">使用 Google 登入</button>
+    <p id="login-error" style="color: var(--danger); display: none;"></p>
+  </div>
+
+  <div id="app" style="display: none;">
+    <header>
+      <h1>💊 <span class="accent">藥品</span>庫存</h1>
+      <div class="user-info">
+        <a id="btn-sheet" href="#" target="_blank" rel="noopener" style="display:none;text-decoration:none;color:inherit;" title="開啟同步 Sheet">📊 <span id="sync-status">未同步</span></a>
+        <span id="user-email"></span>
+        <button class="ghost" id="btn-logout">登出</button>
+      </div>
+    </header>
+
+    <nav>
+      <button data-view="overview" class="active">庫存總覽</button>
+      <button data-view="batches">批次明細</button>
+      <button data-view="add">新增</button>
+      <button data-view="upload">上傳</button>
+    </nav>
+
+    <main>
+      <section id="view-overview" class="view active">
+        <div class="summary">
+          <div class="stat"><div class="num" id="stat-drugs">0</div><div class="label">藥品種類</div></div>
+          <div class="stat warn"><div class="num" id="stat-warn">0</div><div class="label">≤6 個月效期</div></div>
+          <div class="stat danger"><div class="num" id="stat-expired">0</div><div class="label">已過期</div></div>
+        </div>
+        <input type="search" id="search-overview" placeholder="🔍 搜尋藥品名（不分大小寫）" autocomplete="off" style="margin-bottom: 12px;">
+        <div class="scroll-x">
+          <table>
+            <thead><tr><th>藥品</th><th class="qty">總庫存</th><th>最近效期</th><th>批次</th></tr></thead>
+            <tbody id="tbody-overview"></tbody>
+          </table>
+        </div>
+        <div id="empty-overview" class="empty">尚無資料，請先「新增」或「上傳」Excel。</div>
+      </section>
+
+      <section id="view-batches" class="view">
+        <p style="color: var(--muted); font-size: 13px; margin-top: 0;">依效期排序（先進先出 FIFO）— 紅色 = 已過期、黃色 = ≤ 6 個月。</p>
+        <input type="search" id="search-batches" placeholder="🔍 搜尋藥品名" autocomplete="off" style="margin-bottom: 12px;">
+        <div class="scroll-x">
+          <table>
+            <thead><tr><th>藥品</th><th class="qty">數量</th><th>效期</th><th></th></tr></thead>
+            <tbody id="tbody-batches"></tbody>
+          </table>
+        </div>
+        <div id="empty-batches" class="empty">尚無批次。</div>
+      </section>
+
+      <section id="view-add" class="view">
+        <form id="form-add">
+          <label>藥品名 *</label>
+          <input list="drug-list" name="drug" required placeholder="例：Augmentin Sol 475mg/5ml">
+          <datalist id="drug-list"></datalist>
+
+          <div class="row2">
+            <div>
+              <label>數量（可空＝未盤）</label>
+              <input type="number" name="quantity" min="0" step="0.01" inputmode="decimal" placeholder="例：70">
+            </div>
+            <div>
+              <label>單位（可空）</label>
+              <input list="unit-list" name="unit" placeholder="例：瓶">
+              <datalist id="unit-list">
+                <option value="顆"><option value="瓶"><option value="盒"><option value="支"><option value="包"><option value="條"><option value="mL"><option value="片"><option value="袋">
+              </datalist>
+            </div>
+          </div>
+
+          <label>效期 *</label>
+          <input type="date" name="expiry" required>
+
+          <label>進貨日期（選填）</label>
+          <input type="date" name="in_date">
+
+          <button type="submit" class="submit-btn">新增批次</button>
+        </form>
+      </section>
+
+      <section id="view-upload" class="view">
+        <div class="toolbar">
+          <button id="btn-template">📥 下載範本</button>
+          <span style="flex: 1;"></span>
+        </div>
+
+        <label for="file-input" class="upload-zone" id="upload-zone">
+          <div style="font-size: 32px;">📤</div>
+          <div><strong>點此選檔</strong>或拖放 Excel</div>
+          <p>支援 .xlsx / .xls / .csv — 必填欄位：<strong>藥品 / 效期</strong>；數量、單位、進貨日期可空</p>
+          <input type="file" id="file-input" accept=".xlsx,.xls,.csv">
+        </label>
+
+        <div id="preview-area" style="display: none; margin-top: 16px;">
+          <div class="preview-summary">
+            <div class="stat ok"><div class="num" id="prev-new">0</div><div class="label">新批次</div></div>
+            <div class="stat merge"><div class="num" id="prev-merge">0</div><div class="label">合併</div></div>
+            <div class="stat danger"><div class="num" id="prev-err">0</div><div class="label">錯誤</div></div>
+          </div>
+
+          <div class="scroll-x">
+            <table>
+              <thead><tr><th>狀態</th><th>藥品</th><th class="qty">數量</th><th>單位</th><th>效期</th><th>進貨日</th></tr></thead>
+              <tbody id="tbody-preview"></tbody>
+            </table>
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-top: 12px;">
+            <button id="btn-import" class="submit-btn" style="flex: 2;">確認匯入</button>
+            <button id="btn-cancel" class="ghost" style="flex: 1;">取消</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+    import {
+      getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+    import {
+      getFirestore, collection, addDoc, updateDoc, deleteDoc, doc,
+      getDoc, setDoc, onSnapshot,
+      query, orderBy, serverTimestamp, Timestamp
+    } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyD_GPUQt9JRiCpi6k-LEDcrQMaAgauYzCA",
+      authDomain: "pharmacy-inventory-chc.firebaseapp.com",
+      projectId: "pharmacy-inventory-chc",
+      storageBucket: "pharmacy-inventory-chc.firebasestorage.app",
+      messagingSenderId: "370443455464",
+      appId: "1:370443455464:web:2572dc23ff51815958725d"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const provider = new GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+
+    // OAuth access token for Sheets API (captured at login, lost on page refresh)
+    let sheetsAccessToken = null;
+    try { sheetsAccessToken = sessionStorage.getItem('sheetsAccessToken'); } catch {}
+
+    const $ = (id) => document.getElementById(id);
+    const toast = (msg, isError = false) => {
+      const t = $('toast');
+      t.textContent = msg;
+      t.className = 'toast show' + (isError ? ' error' : '');
+      setTimeout(() => t.classList.remove('show'), 2500);
+    };
+
+    // ===== Auth =====
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        $('login-screen').style.display = 'none';
+        $('app').style.display = 'block';
+        $('user-email').textContent = user.email;
+        // 顯示 Sheet 按鈕（不論有沒有授權 token）
+        $('btn-sheet').style.display = 'inline';
+        if (!sheetsAccessToken) {
+          setSyncStatus('需授權', 'err');
+          $('btn-sheet').onclick = async (ev) => {
+            ev.preventDefault();
+            const ok = await reauthForSheets();
+            if (ok) syncToSheet();
+          };
+        } else {
+          setSyncStatus('準備中…', 'busy');
+        }
+        subscribeBatches();
+      } else {
+        $('login-screen').style.display = 'block';
+        $('app').style.display = 'none';
+        $('btn-sheet').style.display = 'none';
+      }
+    });
+
+    $('btn-login').onclick = async () => {
+      try {
+        const result = await signInWithPopup(auth, provider);
+        const cred = GoogleAuthProvider.credentialFromResult(result);
+        if (cred?.accessToken) {
+          sheetsAccessToken = cred.accessToken;
+          try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
+        }
+      } catch (e) {
+        $('login-error').textContent = '登入失敗：' + e.message;
+        $('login-error').style.display = 'block';
+      }
+    };
+    $('btn-logout').onclick = () => {
+      sheetsAccessToken = null;
+      try { sessionStorage.removeItem('sheetsAccessToken'); } catch {}
+      signOut(auth);
+    };
+
+    // Re-auth helper to refresh Sheets access token after page reload
+    async function reauthForSheets() {
+      try {
+        const result = await signInWithPopup(auth, provider);
+        const cred = GoogleAuthProvider.credentialFromResult(result);
+        if (cred?.accessToken) {
+          sheetsAccessToken = cred.accessToken;
+          try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
+          return true;
+        }
+      } catch (e) {
+        toast('Sheet 授權失敗：' + e.message, true);
+      }
+      return false;
+    }
+
+    // ===== Nav =====
+    document.querySelectorAll('nav button').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        btn.classList.add('active');
+        $('view-' + btn.dataset.view).classList.add('active');
+      };
+    });
+
+    // ===== Search =====
+    $('search-overview').addEventListener('input', () => renderOverview());
+    $('search-batches').addEventListener('input', () => renderBatches());
+
+    // ===== Data =====
+    let allBatches = [];
+    let allIntakeLogs = [];
+    let allDispenseLogs = [];
+
+    function subscribeBatches() {
+      onSnapshot(query(collection(db, 'batches'), orderBy('expiry', 'asc')), (snap) => {
+        allBatches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderOverview();
+        renderBatches();
+        renderDrugDatalist();
+        scheduleSync();
+      }, (err) => toast('讀取失敗：' + err.message, true));
+
+      onSnapshot(query(collection(db, 'intake_logs'), orderBy('at', 'desc')), (snap) => {
+        allIntakeLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        scheduleSync();
+      }, () => {});
+
+      onSnapshot(query(collection(db, 'dispense_logs'), orderBy('at', 'desc')), (snap) => {
+        allDispenseLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        scheduleSync();
+      }, () => {});
+    }
+
+    function fmtDate(ts) {
+      if (!ts) return '—';
+      const d = ts.toDate ? ts.toDate() : new Date(ts);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function expiryStatus(ts) {
+      const now = new Date();
+      const exp = ts.toDate ? ts.toDate() : new Date(ts);
+      const days = Math.floor((exp - now) / (1000 * 60 * 60 * 24));
+      if (days < 0) return { class: 'expired', label: '已過期' };
+      if (days <= 180) return { class: 'danger', label: `${days}d` };
+      if (days <= 365) return { class: 'warn', label: `${days}d` };
+      return { class: 'ok', label: `${days}d` };
+    }
+
+    function renderOverview() {
+      const tbody = $('tbody-overview');
+      const empty = $('empty-overview');
+      const grouped = new Map();
+      let warnCount = 0, expiredCount = 0;
+
+      for (const b of allBatches) {
+        const status = expiryStatus(b.expiry);
+        if (status.class === 'expired') expiredCount++;
+        else if (status.class === 'danger') warnCount++;
+
+        if (!grouped.has(b.drug)) grouped.set(b.drug, { qty: 0, unit: b.unit || '', expiry: b.expiry, batches: 0, allUnknown: true });
+        const g = grouped.get(b.drug);
+        if (b.quantity != null) {
+          g.qty += Number(b.quantity);
+          g.allUnknown = false;
+        }
+        if (!g.unit && b.unit) g.unit = b.unit;
+        g.batches++;
+        if (b.expiry < g.expiry) g.expiry = b.expiry;
+      }
+
+      $('stat-drugs').textContent = grouped.size;
+      $('stat-warn').textContent = warnCount;
+      $('stat-expired').textContent = expiredCount;
+
+      const searchInput = $('search-overview');
+      const q = (searchInput?.value || '').trim().toLowerCase();
+      let sorted = [...grouped.entries()].sort((a, b) => a[1].expiry.toMillis() - b[1].expiry.toMillis());
+      if (q) sorted = sorted.filter(([drug]) => drug.toLowerCase().includes(q));
+
+      tbody.innerHTML = '';
+      for (const [drug, g] of sorted) {
+        const status = expiryStatus(g.expiry);
+        const qtyDisplay = g.allUnknown ? '<span style="color:var(--muted)">未盤</span>' : `${g.qty.toLocaleString()} ${g.unit || ''}`;
+        tbody.innerHTML += `<tr>
+          <td>${drug}</td>
+          <td class="qty">${qtyDisplay}</td>
+          <td class="expiry">${fmtDate(g.expiry)} <span class="badge ${status.class}">${status.label}</span></td>
+          <td>${g.batches}</td>
+        </tr>`;
+      }
+      if (grouped.size === 0) {
+        empty.textContent = '尚無資料，請先「新增」或「上傳」Excel。';
+        empty.style.display = 'block';
+      } else if (sorted.length === 0) {
+        empty.textContent = `找不到包含「${q}」的藥品。`;
+        empty.style.display = 'block';
+      } else {
+        empty.style.display = 'none';
+      }
+    }
+
+    function renderBatches() {
+      const tbody = $('tbody-batches');
+      const empty = $('empty-batches');
+      const q = ($('search-batches')?.value || '').trim().toLowerCase();
+      const list = q ? allBatches.filter(b => (b.drug || '').toLowerCase().includes(q)) : allBatches;
+      tbody.innerHTML = '';
+      for (const b of list) {
+        const status = expiryStatus(b.expiry);
+        const qtyDisplay = b.quantity == null
+          ? '<span style="color:var(--muted)">—</span>'
+          : `${Number(b.quantity).toLocaleString()} ${b.unit || ''}`;
+        tbody.innerHTML += `<tr>
+          <td>${b.drug}</td>
+          <td class="qty">${qtyDisplay}</td>
+          <td class="expiry">${fmtDate(b.expiry)} <span class="badge ${status.class}">${status.label}</span></td>
+          <td><button class="delete-btn" data-id="${b.id}">刪</button></td>
+        </tr>`;
+      }
+      if (allBatches.length === 0) {
+        empty.textContent = '尚無批次。';
+        empty.style.display = 'block';
+      } else if (list.length === 0) {
+        empty.textContent = `找不到包含「${q}」的批次。`;
+        empty.style.display = 'block';
+      } else {
+        empty.style.display = 'none';
+      }
+
+      tbody.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm('確定刪除這個批次？')) return;
+          try {
+            await deleteDoc(doc(db, 'batches', btn.dataset.id));
+            toast('已刪除');
+          } catch (e) {
+            toast('刪除失敗：' + e.message, true);
+          }
+        };
+      });
+    }
+
+    function renderDrugDatalist() {
+      const dl = $('drug-list');
+      const drugs = [...new Set(allBatches.map(b => b.drug))].sort();
+      dl.innerHTML = drugs.map(d => `<option value="${d.replace(/"/g, '&quot;')}">`).join('');
+    }
+
+    // ===== Add or merge batch (shared by manual + upload) =====
+    function expiryKeyFromDate(d) {
+      // Use yyyy-mm-dd in local time as merge key
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+    function findExistingBatch(drug, expiryDate) {
+      const key = expiryKeyFromDate(expiryDate);
+      return allBatches.find(b => b.drug === drug && fmtDate(b.expiry) === key);
+    }
+    async function addOrMergeBatch({ drug, quantity, unit, expiry, in_date }) {
+      // quantity 可為 null（未盤）；unit 可為空字串
+      const qtyNorm = (quantity == null || quantity === '') ? null : Number(quantity);
+      const unitNorm = (unit || '').trim();
+      const existing = findExistingBatch(drug, expiry);
+      let action;
+      if (existing) {
+        if (existing.unit && unitNorm && existing.unit !== unitNorm) {
+          throw new Error(`單位不符（既有「${existing.unit}」vs 新「${unitNorm}」）`);
+        }
+        const mergedUnit = existing.unit || unitNorm || '';
+        // 任一邊為 null 時保留另一邊；都為 null 時為 null；都有則相加
+        let mergedQty;
+        if (existing.quantity == null && qtyNorm == null) mergedQty = null;
+        else mergedQty = Number(existing.quantity || 0) + Number(qtyNorm || 0);
+        await updateDoc(doc(db, 'batches', existing.id), {
+          quantity: mergedQty,
+          unit: mergedUnit,
+          last_in_date: in_date ? Timestamp.fromDate(in_date) : (existing.last_in_date || null),
+          last_updated_at: serverTimestamp(),
+          last_updated_by: auth.currentUser.email
+        });
+        action = 'merged';
+      } else {
+        await addDoc(collection(db, 'batches'), {
+          drug,
+          quantity: qtyNorm,
+          unit: unitNorm,
+          expiry: Timestamp.fromDate(expiry),
+          in_date: in_date ? Timestamp.fromDate(in_date) : null,
+          created_at: serverTimestamp(),
+          created_by: auth.currentUser.email
+        });
+        action = 'added';
+      }
+      // 寫進貨紀錄
+      await addDoc(collection(db, 'intake_logs'), {
+        drug,
+        quantity: qtyNorm,
+        unit: unitNorm,
+        expiry: Timestamp.fromDate(expiry),
+        in_date: in_date ? Timestamp.fromDate(in_date) : null,
+        action,
+        at: serverTimestamp(),
+        by: auth.currentUser.email
+      });
+      return action;
+    }
+
+    // ===== Manual add =====
+    $('form-add').onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const drug = fd.get('drug').trim();
+      const qtyStr = fd.get('quantity');
+      const quantity = qtyStr === '' || qtyStr == null ? null : Number(qtyStr);
+      const unit = fd.get('unit').trim();
+      const expiryStr = fd.get('expiry');
+      const inDateStr = fd.get('in_date');
+
+      if (!drug || !expiryStr) {
+        toast('藥品名和效期為必填', true);
+        return;
+      }
+      if (quantity != null && isNaN(quantity)) {
+        toast('數量格式錯誤', true);
+        return;
+      }
+      try {
+        const result = await addOrMergeBatch({
+          drug, quantity, unit,
+          expiry: new Date(expiryStr),
+          in_date: inDateStr ? new Date(inDateStr) : null
+        });
+        e.target.reset();
+        toast(result === 'merged' ? `已合併到既有批次：${drug}` : `已新增：${drug}`);
+        document.querySelector('nav button[data-view="overview"]').click();
+      } catch (err) {
+        toast('失敗：' + err.message, true);
+      }
+    };
+
+    // ===== Excel template download =====
+    $('btn-template').onclick = () => {
+      const data = [
+        ['藥品', '數量', '單位', '效期', '進貨日期'],
+        ['Augmentin Sol 475mg/5ml', 70, '瓶', '2026-04-30', '2025-12-18'],
+        ['Lipitor 10mg', 100, '顆', '2027-06-30', ''],
+        ['Mocalm', 1, '盒', '2026-04-30', '']
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      ws['!cols'] = [{ wch: 28 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 12 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, '進貨清單');
+      XLSX.writeFile(wb, '進貨範本.xlsx');
+    };
+
+    // ===== Excel upload =====
+    let pendingRows = [];
+
+    function parseDateCell(v) {
+      if (v == null || v === '') return null;
+      if (v instanceof Date) return v;
+      if (typeof v === 'number') {
+        // Excel serial date
+        const d = XLSX.SSF.parse_date_code(v);
+        if (!d) return null;
+        return new Date(d.y, d.m - 1, d.d);
+      }
+      const s = String(v).trim().replace(/\./g, '-').replace(/\//g, '-');
+      const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+      const d = new Date(s);
+      return isNaN(d) ? null : d;
+    }
+
+    function validateRow(row, idx) {
+      const drug = String(row['藥品'] || '').trim();
+      const qtyRaw = row['數量'];
+      const unit = String(row['單位'] || '').trim();
+      const expiry = parseDateCell(row['效期']);
+      const in_date = parseDateCell(row['進貨日期']);
+      const hasQty = qtyRaw !== '' && qtyRaw != null;
+      const quantity = hasQty ? Number(qtyRaw) : null;
+
+      const errors = [];
+      if (!drug) errors.push('缺藥品');
+      if (hasQty && isNaN(quantity)) errors.push('數量格式錯');
+      if (!expiry) errors.push('效期無效');
+
+      const r = { rowNum: idx + 2, drug, quantity, unit, expiry, in_date, errors, status: 'new' };
+      if (errors.length) { r.status = 'error'; return r; }
+
+      const existing = findExistingBatch(drug, expiry);
+      if (existing) {
+        if (existing.unit && unit && existing.unit !== unit) {
+          r.status = 'error';
+          r.errors.push(`單位與既有不符（${existing.unit}）`);
+        } else {
+          r.status = 'merge';
+          r.mergeTarget = existing;
+        }
+      }
+      return r;
+    }
+
+    function renderPreview(rows) {
+      pendingRows = rows;
+      const tbody = $('tbody-preview');
+      let nNew = 0, nMerge = 0, nErr = 0;
+      tbody.innerHTML = rows.map(r => {
+        if (r.status === 'new') nNew++;
+        else if (r.status === 'merge') nMerge++;
+        else nErr++;
+
+        const expStr = r.expiry ? expiryKeyFromDate(r.expiry) : '—';
+        const inStr = r.in_date ? expiryKeyFromDate(r.in_date) : '—';
+        const mergeQtyTxt = r.status === 'merge'
+          ? (r.quantity == null ? '合併（不變）' : `合併 +${r.quantity}`)
+          : '';
+        const badge = r.status === 'new' ? '<span class="badge ok">新</span>'
+                    : r.status === 'merge' ? `<span class="badge warn">${mergeQtyTxt}</span>`
+                    : `<span class="badge expired">錯</span>`;
+        const errMsg = r.errors.length ? `<div class="err-msg">${r.errors.join('、')}</div>` : '';
+        const qtyCell = r.quantity == null ? '—' : r.quantity;
+        return `<tr class="row-${r.status === 'error' ? 'error' : (r.status === 'merge' ? 'merge' : '')}">
+          <td>${badge}${errMsg}</td>
+          <td>${r.drug || '—'}</td>
+          <td class="qty">${qtyCell}</td>
+          <td>${r.unit || '—'}</td>
+          <td>${expStr}</td>
+          <td>${inStr}</td>
+        </tr>`;
+      }).join('');
+      $('prev-new').textContent = nNew;
+      $('prev-merge').textContent = nMerge;
+      $('prev-err').textContent = nErr;
+      $('preview-area').style.display = 'block';
+      $('btn-import').textContent = `確認匯入 ${nNew + nMerge} 筆` + (nErr ? `（跳過 ${nErr} 筆錯誤）` : '');
+      $('btn-import').disabled = (nNew + nMerge) === 0;
+    }
+
+    function handleFile(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+          const sheet = wb.Sheets[wb.SheetNames[0]];
+          const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          if (!json.length) { toast('Excel 沒資料', true); return; }
+          const required = ['藥品', '效期'];
+          const headers = Object.keys(json[0]);
+          const missing = required.filter(c => !headers.includes(c));
+          if (missing.length) {
+            toast(`欄位缺少：${missing.join('、')}`, true);
+            return;
+          }
+          const rows = json.map((r, i) => validateRow(r, i));
+          renderPreview(rows);
+        } catch (err) {
+          toast('解析失敗：' + err.message, true);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    const uploadZone = $('upload-zone');
+    const fileInput = $('file-input');
+    fileInput.onchange = (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); };
+    ['dragenter', 'dragover'].forEach(ev => uploadZone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation(); uploadZone.classList.add('dragover');
+    }));
+    ['dragleave', 'drop'].forEach(ev => uploadZone.addEventListener(ev, e => {
+      e.preventDefault(); e.stopPropagation(); uploadZone.classList.remove('dragover');
+    }));
+    uploadZone.addEventListener('drop', e => {
+      const f = e.dataTransfer.files[0];
+      if (f) handleFile(f);
+    });
+
+    $('btn-cancel').onclick = () => {
+      pendingRows = [];
+      $('preview-area').style.display = 'none';
+      fileInput.value = '';
+    };
+
+    $('btn-import').onclick = async () => {
+      const valid = pendingRows.filter(r => r.status !== 'error');
+      if (!valid.length) return;
+      $('btn-import').disabled = true;
+      $('btn-import').textContent = '匯入中…';
+      let ok = 0, fail = 0;
+      for (const r of valid) {
+        try {
+          await addOrMergeBatch({
+            drug: r.drug, quantity: r.quantity, unit: r.unit,
+            expiry: r.expiry, in_date: r.in_date
+          });
+          ok++;
+        } catch (err) {
+          fail++;
+          console.error('Import row failed:', r, err);
+        }
+      }
+      toast(`匯入完成：${ok} 筆${fail ? `，失敗 ${fail} 筆` : ''}`, fail > 0);
+      $('btn-cancel').click();
+      document.querySelector('nav button[data-view="overview"]').click();
+    };
+
+    // ===== Google Sheet sync =====
+    const SHEET_TITLE = '藥品庫存（自動同步）';
+    const TAB_INVENTORY = '庫存';
+    const TAB_INTAKE = '進貨紀錄';
+    const TAB_DISPENSE = '出貨紀錄';
+
+    let syncSheetId = null;
+    let syncTimer = null;
+    let isSyncing = false;
+    let syncEnabled = true;
+
+    function setSyncStatus(text, kind) {
+      const el = $('sync-status');
+      if (!el) return;
+      el.textContent = text;
+      el.style.color = kind === 'err' ? 'var(--danger)' : kind === 'ok' ? 'var(--ok)' : kind === 'busy' ? 'var(--warn)' : 'var(--muted)';
+    }
+
+    async function sheetsApi(path, method = 'GET', body = null) {
+      if (!sheetsAccessToken) throw new Error('NO_TOKEN');
+      const res = await fetch(`https://sheets.googleapis.com/v4${path}`, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${sheetsAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: body ? JSON.stringify(body) : null
+      });
+      if (res.status === 401) {
+        sheetsAccessToken = null;
+        try { sessionStorage.removeItem('sheetsAccessToken'); } catch {}
+        throw new Error('TOKEN_EXPIRED');
+      }
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`Sheets API ${res.status}: ${t}`);
+      }
+      return res.json();
+    }
+
+    async function getOrCreateSyncSheet() {
+      if (syncSheetId) return syncSheetId;
+
+      // Read existing meta
+      const metaRef = doc(db, '_meta', 'sync');
+      const metaSnap = await getDoc(metaRef);
+      if (metaSnap.exists() && metaSnap.data().sheetId) {
+        syncSheetId = metaSnap.data().sheetId;
+        $('btn-sheet').href = `https://docs.google.com/spreadsheets/d/${syncSheetId}`;
+        return syncSheetId;
+      }
+
+      // Create new spreadsheet with 3 sheets
+      setSyncStatus('建 Sheet…', 'busy');
+      const created = await sheetsApi('/spreadsheets', 'POST', {
+        properties: { title: SHEET_TITLE },
+        sheets: [
+          { properties: { title: TAB_INVENTORY, gridProperties: { frozenRowCount: 1 } } },
+          { properties: { title: TAB_INTAKE, gridProperties: { frozenRowCount: 1 } } },
+          { properties: { title: TAB_DISPENSE, gridProperties: { frozenRowCount: 1 } } }
+        ]
+      });
+      syncSheetId = created.spreadsheetId;
+      $('btn-sheet').href = `https://docs.google.com/spreadsheets/d/${syncSheetId}`;
+      await setDoc(metaRef, {
+        sheetId: syncSheetId,
+        createdBy: auth.currentUser.email,
+        createdAt: serverTimestamp()
+      });
+      toast('已建立同步 Sheet — 點 📊 開啟並分享給同事');
+      return syncSheetId;
+    }
+
+    function fmtDateOrEmpty(ts) {
+      if (!ts) return '';
+      const d = ts.toDate ? ts.toDate() : new Date(ts);
+      return isNaN(d) ? '' : d.toISOString().slice(0, 10);
+    }
+
+    function buildInventoryRows() {
+      const headers = ['藥品', '數量', '單位', '效期', '進貨日期', '距效期(天)', '狀態'];
+      const rows = allBatches.map(b => {
+        const exp = b.expiry?.toDate ? b.expiry.toDate() : new Date(b.expiry);
+        const days = Math.floor((exp - new Date()) / 86400000);
+        const status = days < 0 ? '已過期' : days <= 180 ? '近效 ≤6個月' : days <= 365 ? '注意 ≤1年' : '正常';
+        return [b.drug, b.quantity, b.unit, fmtDateOrEmpty(b.expiry), fmtDateOrEmpty(b.in_date || b.last_in_date), days, status];
+      });
+      return [headers, ...rows];
+    }
+
+    function buildIntakeRows() {
+      const headers = ['時間', '操作者', '藥品', '數量', '單位', '效期', '進貨日期', '動作'];
+      const rows = allIntakeLogs.map(l => [
+        l.at?.toDate ? l.at.toDate().toLocaleString('sv-SE') : '',
+        l.by || '',
+        l.drug, l.quantity, l.unit,
+        fmtDateOrEmpty(l.expiry), fmtDateOrEmpty(l.in_date),
+        l.action === 'merged' ? '合併' : '新增'
+      ]);
+      return [headers, ...rows];
+    }
+
+    function buildDispenseRows() {
+      const headers = ['時間', '操作者', '藥品', '數量', '單位', '效期', '備註'];
+      const rows = allDispenseLogs.map(l => [
+        l.at?.toDate ? l.at.toDate().toLocaleString('sv-SE') : '',
+        l.by || '',
+        l.drug, l.quantity, l.unit,
+        fmtDateOrEmpty(l.expiry),
+        l.note || ''
+      ]);
+      return [headers, ...rows];
+    }
+
+    async function syncToSheet() {
+      if (!syncEnabled) return;
+      if (!sheetsAccessToken) { setSyncStatus('未授權', 'err'); return; }
+      if (isSyncing) return;
+      isSyncing = true;
+      setSyncStatus('同步中…', 'busy');
+      try {
+        const id = await getOrCreateSyncSheet();
+        const data = [
+          { range: `${TAB_INVENTORY}!A1`, values: buildInventoryRows() },
+          { range: `${TAB_INTAKE}!A1`, values: buildIntakeRows() },
+          { range: `${TAB_DISPENSE}!A1`, values: buildDispenseRows() }
+        ];
+        // Clear all 3 tabs first
+        await sheetsApi(`/spreadsheets/${id}/values:batchClear`, 'POST', {
+          ranges: [`${TAB_INVENTORY}!A:Z`, `${TAB_INTAKE}!A:Z`, `${TAB_DISPENSE}!A:Z`]
+        });
+        // Write fresh
+        await sheetsApi(`/spreadsheets/${id}/values:batchUpdate`, 'POST', {
+          valueInputOption: 'USER_ENTERED',
+          data
+        });
+        const ts = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+        setSyncStatus(`已同步 ${ts}`, 'ok');
+        $('btn-sheet').style.display = 'inline';
+        $('btn-sheet').onclick = null;
+      } catch (e) {
+        if (e.message === 'NO_TOKEN' || e.message === 'TOKEN_EXPIRED') {
+          setSyncStatus('需重新授權', 'err');
+          $('btn-sheet').style.display = 'inline';
+          $('btn-sheet').onclick = async (ev) => { ev.preventDefault(); await reauthForSheets(); syncToSheet(); };
+        } else {
+          setSyncStatus('同步失敗', 'err');
+          // 把完整錯誤顯示給使用者
+          const detail = (e.message || String(e)).slice(0, 200);
+          toast('同步失敗：' + detail, true);
+          console.error('Sync failed:', e);
+        }
+      } finally {
+        isSyncing = false;
+      }
+    }
+
+    function scheduleSync() {
+      clearTimeout(syncTimer);
+      syncTimer = setTimeout(syncToSheet, 1500);
+    }
+  </script>
+</body>
+</html>
