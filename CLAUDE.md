@@ -10,7 +10,7 @@
 
 ## 工作桌 + 三個家
 - 📋 GDrive 工作桌：`G:\我的雲端硬碟\藥品庫存\`（自動跨電腦同步）
-- 🐙 GitHub repo：`chc71173-spec/藥品庫存`（公開，網頁的家）
+- 🐙 GitHub repo：`chc71173-spec/pharmacy-inventory`（公開，網頁的家）— https://github.com/chc71173-spec/pharmacy-inventory
 - 📘 Obsidian 駕駛艙：`secondbrain/藥品庫存/工作筆記.md`（想法的家）
 - 🔥 Firebase 專案：（待設定，資料的家）
 
