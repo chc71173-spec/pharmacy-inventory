@@ -341,8 +341,7 @@
       <button data-view="overview" class="active">庫存總覽</button>
       <button data-view="warn">⚠️ 近效</button>
       <button data-view="batches">批次明細</button>
-      <button data-view="add">新增</button>
-      <button data-view="upload">上傳</button>
+      <button data-view="intake">進貨</button>
       <button data-view="dispense">出貨</button>
     </nav>
 
@@ -369,7 +368,7 @@
             <tbody id="tbody-overview"></tbody>
           </table>
         </div>
-        <div id="empty-overview" class="empty">尚無資料，請先「新增」或「上傳」Excel。</div>
+        <div id="empty-overview" class="empty">尚無資料，請先到「進貨」分頁新增或上傳。</div>
       </section>
 
       <section id="view-warn" class="view">
@@ -394,7 +393,8 @@
         <div id="empty-batches" class="empty">尚無批次。</div>
       </section>
 
-      <section id="view-add" class="view">
+      <section id="view-intake" class="view">
+        <h3 style="margin-top: 0; font-size: 14px; color: var(--muted);">📝 手動進貨（單筆）</h3>
         <form id="form-add">
           <label>藥品名 *</label>
           <input list="drug-list" name="drug" required placeholder="例：Augmentin Sol 475mg/5ml">
@@ -422,9 +422,8 @@
 
           <button type="submit" class="submit-btn">新增批次</button>
         </form>
-      </section>
 
-      <section id="view-upload" class="view">
+        <h3 style="margin-top: 24px; font-size: 14px; color: var(--muted);">📊 Excel 批次上傳</h3>
         <div class="toolbar">
           <button id="btn-template">📥 下載範本</button>
           <span style="flex: 1;"></span>
@@ -458,6 +457,15 @@
             <button id="btn-cancel" class="ghost" style="flex: 1;">取消</button>
           </div>
         </div>
+
+        <h3 style="margin-top: 24px; font-size: 14px; color: var(--muted);">📜 最近 20 筆進貨</h3>
+        <div class="scroll-x">
+          <table>
+            <thead><tr><th>時間</th><th>藥品</th><th class="qty">數量</th><th>動作</th></tr></thead>
+            <tbody id="tbody-recent-intake"></tbody>
+          </table>
+        </div>
+        <div id="empty-recent-intake" class="empty">尚無進貨紀錄。</div>
       </section>
 
       <section id="view-dispense" class="view">
@@ -807,6 +815,7 @@
 
       onSnapshot(query(collection(db, 'intake_logs'), orderBy('at', 'desc')), (snap) => {
         allIntakeLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderRecentIntake();
         scheduleSync();
       }, () => {});
 
@@ -884,7 +893,7 @@
         </tr>`;
       }
       if (grouped.size === 0) {
-        empty.textContent = '尚無資料，請先「新增」或「上傳」Excel。';
+        empty.textContent = '尚無資料，請先到「進貨」分頁新增或上傳。';
         empty.style.display = 'block';
       } else if (sorted.length === 0) {
         empty.textContent = `找不到包含「${q}」的藥品。`;
@@ -1635,6 +1644,29 @@
       $('btn-disp-cancel').click();
       document.querySelector('nav button[data-view="overview"]').click();
     };
+
+    function renderRecentIntake() {
+      const tbody = $('tbody-recent-intake');
+      const empty = $('empty-recent-intake');
+      if (!tbody) return;
+      const items = allIntakeLogs.slice(0, 20);
+      tbody.innerHTML = items.map(l => {
+        const t = l.at?.toDate ? l.at.toDate().toLocaleString('sv-SE').slice(5, 16) : '—';
+        const action = l.action === 'updated'
+          ? '<span class="badge warn">更新</span>'
+          : '<span class="badge ok">新增</span>';
+        const qty = l.quantity == null
+          ? '<span style="color:var(--muted)">未盤</span>'
+          : `${Number(l.quantity).toLocaleString()}${l.unit ? ` <span class="qty-unit">${l.unit}</span>` : ''}`;
+        return `<tr>
+          <td>${t}</td>
+          <td>${l.drug}</td>
+          <td class="qty">${qty}</td>
+          <td>${action}</td>
+        </tr>`;
+      }).join('');
+      empty.style.display = items.length === 0 ? 'block' : 'none';
+    }
 
     function renderRecentDispense() {
       const tbody = $('tbody-recent-disp');
