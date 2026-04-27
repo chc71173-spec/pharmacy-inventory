@@ -131,19 +131,24 @@ th {
   border-bottom: 1px solid var(--line) !important;
 }
 td {
-  padding: 12px 14px !important;
+  padding: 12px 18px !important;
   border-bottom: 1px solid rgba(192,174,147,.4) !important;
   color: var(--text) !important;
-  font-size: 13.5px !important;
-  /* 中文 + 拉丁字母都用 Noto Sans TC（思源黑體繁中含完整 Latin glyphs） */
-  font-family: "Noto Sans TC", "PingFang TC", system-ui, sans-serif !important;
+  font-size: 14.5px !important;
+  /* 中文 + 拉丁字母都用 Noto Serif TC（思源宋體繁中含完整 Latin glyphs） */
+  font-family: "Noto Serif TC", "Source Han Serif TC", "PingFang TC", serif !important;
   font-weight: 400 !important;
   font-feature-settings: "palt" 1, "kern" 1;
 }
 tr:last-child td { border-bottom: 0 !important; }
 tr:hover td { background: rgba(224,203,168,.25) !important; }
-td.qty, td.expiry { font-family: var(--mono) !important; font-size: 13px !important; text-align: left !important; }
+td.qty, td.expiry { font-family: var(--mono) !important; font-size: 13.5px !important; text-align: left !important; }
 th.qty { text-align: left !important; }
+
+/* 表格不再強制 100% 寬度，讓欄位緊貼內容（藥品 + 數量不再距離很遠） */
+.scroll-x table { width: auto !important; min-width: auto !important; }
+/* 數字欄位用 nowrap 確保不換行；藥品欄 nowrap 避免長字斷行；最後一個 cell 不要尾端 padding */
+table th, table td { white-space: nowrap; }
 th.sortable:hover, th.sortable.active { color: var(--accent) !important; }
 th.sortable.active .sort-icon { color: var(--accent) !important; }
 
