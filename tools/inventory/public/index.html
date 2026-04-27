@@ -663,13 +663,15 @@
     });
 
     $('btn-login').onclick = async () => {
+      // 診斷：按鈕變字確認 click 有進來
+      $('btn-login').textContent = '處理中…';
+      $('btn-login').style.opacity = '0.6';
       try {
-        // 手機：直接 redirect（popup 在 iOS 會被 Google OAuth 視為 disallowed_useragent）
         if (isMobile) {
+          $('btn-login').textContent = '正在跳轉 Google…';
           await signInWithRedirect(auth, provider);
           return;
         }
-        // 桌機：popup
         const result = await signInWithPopup(auth, provider);
         const cred = GoogleAuthProvider.credentialFromResult(result);
         if (cred?.accessToken) {
@@ -677,7 +679,9 @@
           try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
         }
       } catch (e) {
-        $('login-error').textContent = '登入失敗：' + (e.code || '') + ' ' + e.message;
+        $('btn-login').textContent = '使用 Google 登入';
+        $('btn-login').style.opacity = '1';
+        $('login-error').textContent = '登入失敗：' + (e.code || '') + ' ' + (e.message || e);
         $('login-error').style.display = 'block';
       }
     };
