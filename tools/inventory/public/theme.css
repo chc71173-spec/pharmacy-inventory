@@ -145,10 +145,19 @@ tr:hover td { background: rgba(224,203,168,.25) !important; }
 td.qty, td.expiry { font-family: var(--mono) !important; font-size: 13.5px !important; text-align: left !important; }
 th.qty { text-align: left !important; }
 
-/* 表格不再強制 100% 寬度，讓欄位緊貼內容（藥品 + 數量不再距離很遠） */
-.scroll-x table { width: auto !important; min-width: auto !important; }
-/* 數字欄位用 nowrap 確保不換行；藥品欄 nowrap 避免長字斷行；最後一個 cell 不要尾端 padding */
+/* 表格 100% 寬度，全表對齊好看 */
+.scroll-x table { width: 100% !important; }
 table th, table td { white-space: nowrap; }
+
+/* 庫存總覽欄位寬度分配：藥品較寬，其他三欄合理大小 */
+#view-overview thead th:first-child,
+#view-overview tbody td:first-child { width: 38%; }
+#view-overview thead th.qty,
+#view-overview tbody td.qty { width: 16%; }
+#view-overview thead th[data-en="EXPIRY"],
+#view-overview tbody td.expiry { width: 32%; }
+#view-overview thead th[data-en="LOT"],
+#view-overview tbody td:nth-child(4) { width: 14%; }
 th.sortable:hover, th.sortable.active { color: var(--accent) !important; }
 th.sortable.active .sort-icon { color: var(--accent) !important; }
 

@@ -691,10 +691,14 @@
     async function reauthForSheets() {
       let stage = '開始';
       try {
-        // 手機：用 signInWithRedirect（即使已登入也用，避免 reauth 沒帶 access_token 的怪 case）
+        // 手機：直接 redirect（已登入用 reauth，未登入用 signIn）
         if (isMobile) {
           stage = 'redirect';
-          await signInWithRedirect(auth, provider);
+          if (auth.currentUser) {
+            await reauthenticateWithRedirect(auth.currentUser, provider);
+          } else {
+            await signInWithRedirect(auth, provider);
+          }
           return false;
         }
         // 桌機：popup
