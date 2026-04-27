@@ -578,14 +578,35 @@
 
     // redirect 流程返回時，從 getRedirectResult 取得 OAuth credential
     getRedirectResult(auth).then(result => {
-      if (!result) return;
+      if (!result) {
+        console.log('[Auth] no redirect result（首次載入或非 redirect 返回）');
+        return;
+      }
+      console.log('[Auth] redirect result 收到', result);
       const cred = GoogleAuthProvider.credentialFromResult(result);
+      console.log('[Auth] credential', cred);
       if (cred?.accessToken) {
         sheetsAccessToken = cred.accessToken;
         try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
-        console.log('[Auth] redirect 返回，token 取得');
+        console.log('[Auth] token 取得，', cred.accessToken.length, '字元');
+        // 等 setSyncStatus 等函式可用後再呼叫
+        setTimeout(() => {
+          if (typeof setSyncStatus === 'function') setSyncStatus('已授權，準備同步…', 'busy');
+          if (typeof syncToSheet === 'function') syncToSheet();
+        }, 300);
+      } else {
+        // redirect 完但沒拿到 token — 可能是 reauthenticate 的情況
+        setTimeout(() => {
+          if (typeof toast === 'function') toast('redirect 完成但沒拿到 access_token，請再點一次紅色 📊', true);
+        }, 500);
+        console.warn('[Auth] redirect 完成但 cred.accessToken 為空');
       }
-    }).catch(e => console.error('[Auth] redirect result error:', e));
+    }).catch(e => {
+      console.error('[Auth] redirect result error:', e);
+      setTimeout(() => {
+        if (typeof toast === 'function') toast('Redirect 錯誤：' + (e.message || e.code), true);
+      }, 500);
+    });
 
     // ===== Module state（要在所有 event handler 與 async 程式之前宣告，避免 TDZ）=====
     let sheetsAccessToken = null;
@@ -670,14 +691,10 @@
     async function reauthForSheets() {
       let stage = '開始';
       try {
-        // 手機：直接 redirect
+        // 手機：用 signInWithRedirect（即使已登入也用，避免 reauth 沒帶 access_token 的怪 case）
         if (isMobile) {
           stage = 'redirect';
-          if (auth.currentUser) {
-            await reauthenticateWithRedirect(auth.currentUser, provider);
-          } else {
-            await signInWithRedirect(auth, provider);
-          }
+          await signInWithRedirect(auth, provider);
           return false;
         }
         // 桌機：popup
