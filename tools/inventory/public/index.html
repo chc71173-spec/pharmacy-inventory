@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>藥品庫存</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     :root {
       --bg: #0f1115;
@@ -426,8 +427,6 @@
         <h3 style="margin-top: 24px; font-size: 14px; color: var(--muted);">📊 Excel 批次上傳</h3>
         <div class="toolbar">
           <button id="btn-template">📥 下載範本</button>
-          <span style="flex: 1;"></span>
-          <button id="btn-clear-all" style="background: var(--danger);">🗑️ 清空全部</button>
         </div>
 
         <label for="file-input" class="upload-zone" id="upload-zone">
@@ -534,8 +533,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
     import {
       getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
-      reauthenticateWithPopup,
-      signInWithRedirect, reauthenticateWithRedirect, getRedirectResult
+      signInWithRedirect, getRedirectResult
     } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
     import {
       getFirestore, collection, addDoc, updateDoc, deleteDoc, doc,
@@ -557,8 +555,35 @@
     const db = getFirestore(app);
     const provider = new GoogleAuthProvider();
     // 登入只用基本 scope（email、profile）— 加 spreadsheets 會觸發 Google disallowed_useragent 擋手機
-    // Sheet token 之後另外用 GIS 取得（見下方）
+    // Sheet token 用 GIS（Google Identity Services）tokenClient 另外取得（見下方 initTokenClient）
     // 不設 prompt：Google 會記住授權，重新驗證時通常一閃而過不再跳同意畫面
+
+    // ===== GIS Token Client（拿 Sheets API access token，不走 Firebase Auth redirect） =====
+    const OAUTH_CLIENT_ID = '370443455464-d87jcb47r93f70voad0u2ufkuta14j96.apps.googleusercontent.com';
+    let tokenClient = null;
+    function initTokenClient() {
+      if (tokenClient) return tokenClient;
+      if (!window.google?.accounts?.oauth2) return null;
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: OAUTH_CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/spreadsheets',
+        callback: (resp) => {
+          if (resp.error || !resp.access_token) {
+            console.error('[GIS] token error', resp);
+            toast(`Sheets 授權失敗：${resp.error || '無 token'}`, true);
+            setSyncStatus('授權失敗', 'err');
+            return;
+          }
+          sheetsAccessToken = resp.access_token;
+          try { sessionStorage.setItem('sheetsAccessToken', resp.access_token); } catch {}
+          console.log('[GIS] token 取得，', resp.access_token.length, '字元');
+          toast('✅ Sheets 已授權');
+          setSyncStatus('已授權，準備同步…', 'busy');
+          syncToSheet();
+        }
+      });
+      return tokenClient;
+    }
 
     // 手機用 redirect（popup 容易被擋），桌機用 popup（不打斷）
     const isMobile = /Android|iPhone|iPad|iPod|Mobile|webOS/i.test(navigator.userAgent);
@@ -577,31 +602,13 @@
       });
     }
 
-    // redirect 流程返回時，從 getRedirectResult 取得 OAuth credential
+    // redirect 流程返回時（手機登入完）— 不再從這裡取 Sheets token，token 走 GIS
     getRedirectResult(auth).then(result => {
       if (!result) {
         console.log('[Auth] no redirect result（首次載入或非 redirect 返回）');
         return;
       }
-      console.log('[Auth] redirect result 收到', result);
-      const cred = GoogleAuthProvider.credentialFromResult(result);
-      console.log('[Auth] credential', cred);
-      if (cred?.accessToken) {
-        sheetsAccessToken = cred.accessToken;
-        try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
-        console.log('[Auth] token 取得，', cred.accessToken.length, '字元');
-        // 等 setSyncStatus 等函式可用後再呼叫
-        setTimeout(() => {
-          if (typeof setSyncStatus === 'function') setSyncStatus('已授權，準備同步…', 'busy');
-          if (typeof syncToSheet === 'function') syncToSheet();
-        }, 300);
-      } else {
-        // redirect 完但沒拿到 token — 可能是 reauthenticate 的情況
-        setTimeout(() => {
-          if (typeof toast === 'function') toast('redirect 完成但沒拿到 access_token，請再點一次紅色 📊', true);
-        }, 500);
-        console.warn('[Auth] redirect 完成但 cred.accessToken 為空');
-      }
+      console.log('[Auth] redirect 登入完成', result.user?.email);
     }).catch(e => {
       console.error('[Auth] redirect result error:', e);
       setTimeout(() => {
@@ -610,6 +617,14 @@
     });
 
     // ===== Module state（要在所有 event handler 與 async 程式之前宣告，避免 TDZ）=====
+    // Token version：升版時清掉舊 sessionStorage token（避免舊 basic-scope token 被當 Sheets token 用）
+    const SHEETS_TOKEN_VERSION = 'gis-v1';
+    try {
+      if (sessionStorage.getItem('sheetsTokenVersion') !== SHEETS_TOKEN_VERSION) {
+        sessionStorage.removeItem('sheetsAccessToken');
+        sessionStorage.setItem('sheetsTokenVersion', SHEETS_TOKEN_VERSION);
+      }
+    } catch {}
     let sheetsAccessToken = null;
     try { sheetsAccessToken = sessionStorage.getItem('sheetsAccessToken'); } catch {}
     let allBatches = [];
@@ -628,6 +643,15 @@
       t.className = 'toast show' + (isError ? ' error' : '');
       setTimeout(() => t.classList.remove('show'), 2500);
     };
+
+    // 藥品名規範化：trim + 全形空格→半形 + 連續空白合併 + 首字母大寫其餘小寫
+    // （讓 "ARICEPT"、"aricept"、"Aricept "、"Aricept　10mg" 都統一為 "Aricept"/"Aricept 10mg"）
+    function normalizeDrugName(s) {
+      if (s == null) return '';
+      const cleaned = String(s).replace(/[\s\u3000]+/g, ' ').trim();
+      if (!cleaned) return '';
+      return cleaned[0].toUpperCase() + cleaned.slice(1).toLowerCase();
+    }
 
     // ===== Auth =====
     // banner 已移除，保留 no-op 函式避免 caller 報錯
@@ -673,12 +697,8 @@
           await signInWithRedirect(auth, provider);
           return;
         }
-        const result = await signInWithPopup(auth, provider);
-        const cred = GoogleAuthProvider.credentialFromResult(result);
-        if (cred?.accessToken) {
-          sheetsAccessToken = cred.accessToken;
-          try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
-        }
+        await signInWithPopup(auth, provider);
+        // Sheets token 不從這裡拿（基本 scope 而已），等使用者點 📊 觸發 GIS
       } catch (e) {
         $('btn-login').textContent = '使用 Google 登入';
         $('btn-login').style.opacity = '1';
@@ -692,42 +712,26 @@
       signOut(auth);
     };
 
-    // Re-auth helper to refresh Sheets access token after page reload
+    // Sheets 授權：用 GIS tokenClient（不走 Firebase Auth redirect，避開 disallowed_useragent）
+    // 注意：requestAccessToken 是 fire-and-forget，token 會經 callback 設定 sheetsAccessToken
     async function reauthForSheets() {
-      let stage = '開始';
+      const tc = initTokenClient();
+      if (!tc) {
+        toast('Google Identity Services 還沒載入，請稍後再試', true);
+        return false;
+      }
       try {
-        // 手機：直接 redirect（已登入用 reauth，未登入用 signIn）
-        if (isMobile) {
-          stage = 'redirect';
-          if (auth.currentUser) {
-            await reauthenticateWithRedirect(auth.currentUser, provider);
-          } else {
-            await signInWithRedirect(auth, provider);
-          }
-          return false;
-        }
-        // 桌機：popup
-        let result;
-        if (auth.currentUser) {
-          stage = 'reauthenticateWithPopup';
-          result = await reauthenticateWithPopup(auth.currentUser, provider);
-        } else {
-          stage = 'signInWithPopup';
-          result = await signInWithPopup(auth, provider);
-        }
-        stage = 'credentialFromResult';
-        const cred = GoogleAuthProvider.credentialFromResult(result);
-        if (!cred) { toast(`OAuth credential 為 null（${stage}）`, true); return false; }
-        if (!cred.accessToken) { toast('OAuth token 為空（GCP Consent Screen 沒加 spreadsheets scope？）', true); return false; }
-        sheetsAccessToken = cred.accessToken;
-        try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
-        toast(`✅ 已授權`);
+        setSyncStatus('授權中…', 'busy');
+        tc.requestAccessToken({
+          hint: auth.currentUser?.email || '',
+          prompt: ''  // 空字串：已授權過就直接拿 token，沒授權才跳同意畫面
+        });
         return true;
       } catch (e) {
-        toast(`授權失敗 @${stage}: ${(e.code || e.message || e).toString().slice(0, 100)}`, true);
-        console.error('reauth error:', e);
+        toast(`授權失敗: ${(e.message || e).toString().slice(0, 100)}`, true);
+        console.error('GIS reauth error:', e);
+        return false;
       }
-      return false;
     }
 
     // ===== Nav =====
@@ -1136,7 +1140,7 @@
     $('form-add').onsubmit = async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
-      const drug = fd.get('drug').trim();
+      const drug = normalizeDrugName(fd.get('drug'));
       const qtyStr = fd.get('quantity');
       const quantity = qtyStr === '' || qtyStr == null ? null : Number(qtyStr);
       const unit = fd.get('unit').trim();
@@ -1203,7 +1207,7 @@
     }
 
     function validateRow(row, idx) {
-      const drug = String(row['藥品'] || '').trim();
+      const drug = normalizeDrugName(row['藥品']);
       const qtyRaw = row['數量'];
       const unit = String(row['單位'] || '').trim();
       const expiry = parseDateCell(row['效期']);
@@ -1507,7 +1511,7 @@
     $('form-dispense').onsubmit = async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
-      const drug = (fd.get('drug') || '').trim();
+      const drug = normalizeDrugName(fd.get('drug'));
       const quantity = Number(fd.get('quantity'));
       const dispDateStr = fd.get('dispense_date');
       const dispense_date = dispDateStr ? new Date(dispDateStr) : new Date();
@@ -1526,7 +1530,7 @@
       }
     };
 
-    $('btn-clear-all').onclick = clearAllData;
+    // 「清空全部」按鈕已從 UI 移除，改用 ?danger=1 URL flag 觸發（見檔案末尾）
 
     // 出貨範本下載
     $('btn-dispense-template').onclick = () => {
@@ -1546,7 +1550,7 @@
     let pendingDispRows = [];
 
     function validateDispRow(row, idx) {
-      const drug = String(row['藥品'] || '').trim();
+      const drug = normalizeDrugName(row['藥品']);
       const qtyRaw = row['數量'];
       const dispDate = parseDateCell(row['出貨日期']) || new Date();
       const quantity = Number(qtyRaw);
@@ -1760,6 +1764,12 @@
       }
       if (!res.ok) {
         const t = await res.text();
+        // 403 + insufficient scopes：token 沒有 spreadsheets 權限（舊 token），當作過期清掉
+        if (res.status === 403 && /insufficient authentication scopes|PERMISSION_DENIED/i.test(t)) {
+          sheetsAccessToken = null;
+          try { sessionStorage.removeItem('sheetsAccessToken'); } catch {}
+          throw new Error('TOKEN_EXPIRED');
+        }
         throw new Error(`Sheets API ${res.status}: ${t}`);
       }
       return res.json();
@@ -1935,6 +1945,153 @@
     function scheduleSync() {
       clearTimeout(syncTimer);
       syncTimer = setTimeout(syncToSheet, 1500);
+    }
+
+    // ===== One-time Drug Name Migration（透過 ?migrate=1 觸發） =====
+    // 把所有 batches / intake_logs / dispense_logs 的 drug 欄位 normalize（trim + 首字大寫）
+    // 同 (norm_drug, expiry, in_date) 的多筆 batches 會自動合併數量（單位衝突跳過）
+    async function runDrugNameMigration() {
+      if (!auth.currentUser) { toast('請先登入', true); return; }
+      if (!allBatches.length && !allIntakeLogs.length && !allDispenseLogs.length) {
+        toast('資料還沒載入完，等一下再點', true);
+        return;
+      }
+
+      // 規劃 batches 操作
+      const groups = new Map();
+      for (const b of allBatches) {
+        const norm = normalizeDrugName(b.drug);
+        const expKey = b.expiry?.toDate ? b.expiry.toDate().toISOString().slice(0, 10) : '';
+        const inKey = b.in_date?.toDate ? b.in_date.toDate().toISOString().slice(0, 10) : '';
+        const key = `${norm}|${expKey}|${inKey}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push({ ...b, _norm: norm });
+      }
+
+      const ops = []; // {type, col, id, data}
+      const conflicts = [];
+      let renamedB = 0, mergedGroups = 0, mergedExtras = 0;
+
+      for (const group of groups.values()) {
+        if (group.length === 1) {
+          const b = group[0];
+          if (b.drug !== b._norm) {
+            ops.push({ type: 'update', col: 'batches', id: b.id, data: { drug: b._norm } });
+            renamedB++;
+          }
+          continue;
+        }
+        // 多筆 → 嘗試合併
+        const units = new Set(group.filter(b => b.unit).map(b => b.unit));
+        if (units.size > 1) {
+          conflicts.push({ drug: group[0]._norm, units: [...units], count: group.length });
+          // 衝突就只 rename 不合併
+          for (const b of group) {
+            if (b.drug !== b._norm) {
+              ops.push({ type: 'update', col: 'batches', id: b.id, data: { drug: b._norm } });
+              renamedB++;
+            }
+          }
+          continue;
+        }
+        // 合併到第一筆
+        const keeper = group[0];
+        let sumQty = 0, anyQty = false;
+        for (const b of group) {
+          if (b.quantity != null) { sumQty += Number(b.quantity); anyQty = true; }
+        }
+        const update = { drug: keeper._norm };
+        if (anyQty) update.quantity = sumQty;
+        const someUnit = group.find(b => b.unit)?.unit;
+        if (someUnit && !keeper.unit) update.unit = someUnit;
+        ops.push({ type: 'update', col: 'batches', id: keeper.id, data: update });
+        for (let i = 1; i < group.length; i++) {
+          ops.push({ type: 'delete', col: 'batches', id: group[i].id });
+          mergedExtras++;
+        }
+        mergedGroups++;
+      }
+
+      // intake_logs / dispense_logs：只 rename drug
+      let renamedIn = 0, renamedDisp = 0;
+      for (const l of allIntakeLogs) {
+        const norm = normalizeDrugName(l.drug);
+        if (l.drug !== norm) {
+          ops.push({ type: 'update', col: 'intake_logs', id: l.id, data: { drug: norm } });
+          renamedIn++;
+        }
+      }
+      for (const l of allDispenseLogs) {
+        const norm = normalizeDrugName(l.drug);
+        if (l.drug !== norm) {
+          ops.push({ type: 'update', col: 'dispense_logs', id: l.id, data: { drug: norm } });
+          renamedDisp++;
+        }
+      }
+
+      const summary = `Migration 預覽：
+
+• Batches 重新命名: ${renamedB} 筆
+• Batches 合併: ${mergedGroups} 組（${mergedExtras} 筆會被刪除）
+• 單位衝突跳過合併: ${conflicts.length} 組
+• intake_logs 重新命名: ${renamedIn} 筆
+• dispense_logs 重新命名: ${renamedDisp} 筆
+
+共 ${ops.length} 個寫入。確認執行？（無法復原，請確認 Firestore PITR 已開）`;
+      if (!confirm(summary)) { toast('已取消'); return; }
+
+      // 暫停 Sheet sync，最後再一次同步
+      const wasEnabled = syncEnabled;
+      syncEnabled = false;
+
+      try {
+        const CHUNK = 450;
+        for (let i = 0; i < ops.length; i += CHUNK) {
+          const slice = ops.slice(i, i + CHUNK);
+          const batch = writeBatch(db);
+          for (const op of slice) {
+            const ref = doc(db, op.col, op.id);
+            if (op.type === 'update') batch.update(ref, op.data);
+            else if (op.type === 'delete') batch.delete(ref);
+          }
+          await batch.commit();
+          toast(`進度 ${Math.min(i + CHUNK, ops.length)}/${ops.length}`);
+        }
+        if (conflicts.length) {
+          console.warn('Migration 單位衝突（未合併）:', conflicts);
+          toast(`✅ Migration 完成 — 但 ${conflicts.length} 組單位衝突未合併，console 看明細`);
+        } else {
+          toast(`✅ Migration 完成（${ops.length} 個寫入）`);
+        }
+      } catch (e) {
+        toast(`Migration 失敗：${e.message || e}`, true);
+        console.error('Migration error:', e);
+      } finally {
+        syncEnabled = wasEnabled;
+        scheduleSync();
+      }
+    }
+
+    // 用 ?migrate=1 才顯示按鈕（避免日常誤觸）
+    if (new URLSearchParams(location.search).get('migrate') === '1') {
+      window.addEventListener('DOMContentLoaded', () => {
+        const btn = document.createElement('button');
+        btn.textContent = '🔧 Run Drug Name Migration';
+        btn.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:9999;background:#c87a5b;color:#fff;padding:12px 18px;border-radius:8px;border:0;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+        btn.onclick = runDrugNameMigration;
+        document.body.appendChild(btn);
+      });
+    }
+
+    // 用 ?danger=1 才顯示「清空全部」按鈕（毀滅性操作，避免日常誤觸）
+    if (new URLSearchParams(location.search).get('danger') === '1') {
+      window.addEventListener('DOMContentLoaded', () => {
+        const btn = document.createElement('button');
+        btn.textContent = '🗑️ 清空全部資料';
+        btn.style.cssText = 'position:fixed;bottom:20px;left:20px;z-index:9999;background:#c0392b;color:#fff;padding:12px 18px;border-radius:8px;border:0;font-size:14px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+        btn.onclick = clearAllData;
+        document.body.appendChild(btn);
+      });
     }
   </script>
 </body>
