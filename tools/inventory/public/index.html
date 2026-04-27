@@ -323,7 +323,13 @@
 
   <div id="app" style="display: none;">
     <header>
-      <h1>💊 <span class="accent">藥品</span>庫存</h1>
+      <div class="brand">
+        <div class="logo-badge">藥</div>
+        <div class="brand-text">
+          <h1>藥品庫存</h1>
+          <div class="brand-subtitle">PHARMACY · INVENTORY</div>
+        </div>
+      </div>
       <div class="user-info">
         <a id="btn-sheet" href="#" target="_blank" rel="noopener" style="display:none;text-decoration:none;color:inherit;" title="開啟同步 Sheet">📊 <span id="sync-status">未同步</span></a>
         <span id="user-email"></span>
@@ -355,10 +361,10 @@
         <div class="scroll-x">
           <table>
             <thead><tr>
-              <th class="sortable" data-sort="drug">藥品 <span class="sort-icon">↕</span></th>
-              <th class="qty">總庫存</th>
-              <th class="sortable" data-sort="expiry">最近效期 <span class="sort-icon">↕</span></th>
-              <th>批次</th>
+              <th class="sortable" data-sort="drug" data-en="DRUG">藥品 <span class="sort-icon">↕</span></th>
+              <th class="qty" data-en="STOCK">總庫存</th>
+              <th class="sortable" data-sort="expiry" data-en="EXPIRY">最近效期 <span class="sort-icon">↕</span></th>
+              <th data-en="LOT">批次</th>
             </tr></thead>
             <tbody id="tbody-overview"></tbody>
           </table>
@@ -867,12 +873,14 @@
       tbody.innerHTML = '';
       for (const [drug, g] of sorted) {
         const status = expiryStatus(g.expiry);
-        const qtyDisplay = g.allUnknown ? '<span style="color:var(--muted)">未盤</span>' : `${g.qty.toLocaleString()} ${g.unit || ''}`;
+        const qtyDisplay = g.allUnknown
+          ? '<span style="color:var(--muted)">未盤</span>'
+          : `${g.qty.toLocaleString()}${g.unit ? ` <span class="qty-unit">${g.unit}</span>` : ''}`;
         tbody.innerHTML += `<tr>
           <td>${drug}</td>
           <td class="qty">${qtyDisplay}</td>
           <td class="expiry">${fmtDate(g.expiry)} <span class="badge ${status.class}">${status.label}</span></td>
-          <td>${g.batches}</td>
+          <td><span class="batch-pill">${g.batches} 批</span></td>
         </tr>`;
       }
       if (grouped.size === 0) {

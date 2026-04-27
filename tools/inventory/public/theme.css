@@ -289,6 +289,83 @@ h3 {
   color: var(--text) !important;
 }
 
+/* ==== Brand logo + 雙語表頭 + 數量單位 + 批次 pill ==== */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.logo-badge {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #C75432, var(--accent) 75%);
+  color: #FAF4E7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 500;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px var(--card), 0 0 0 4px var(--line);
+}
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.brand-text h1 {
+  margin: 0 !important;
+  font-family: var(--serif) !important;
+  font-weight: 500 !important;
+  font-size: 22px !important;
+  letter-spacing: .15em !important;
+  color: var(--text) !important;
+  line-height: 1 !important;
+}
+.brand-subtitle {
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: .35em;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+th[data-en] {
+  vertical-align: top;
+}
+th[data-en]::after {
+  content: attr(data-en);
+  display: block;
+  margin-top: 4px;
+  font-size: 9.5px;
+  letter-spacing: 0.3em;
+  color: rgba(138,117,96,0.5);
+  font-weight: 400;
+  font-family: var(--sans);
+}
+
+.qty-unit {
+  color: var(--muted) !important;
+  font-size: 11px;
+  margin-left: 4px;
+  font-family: var(--sans) !important;
+}
+
+.batch-pill {
+  display: inline-block;
+  padding: 4px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--sans);
+  background: var(--bg);
+  letter-spacing: .04em;
+}
+
 @media (max-width: 600px) {
   header { padding: 12px 14px !important; }
   header h1 { font-size: 17px !important; letter-spacing: .08em; }
@@ -297,4 +374,10 @@ h3 {
   th, td { padding: 9px 10px !important; font-size: 13px !important; }
   th { font-size: 11px !important; }
   input, select { font-size: 16px !important; }
+  .brand { gap: 10px; }
+  .logo-badge { width: 38px; height: 38px; font-size: 18px; box-shadow: 0 0 0 2px var(--card), 0 0 0 3px var(--line); }
+  .brand-text h1 { font-size: 17px !important; }
+  .brand-subtitle { font-size: 9px; letter-spacing: .25em; }
+  th[data-en]::after { font-size: 8.5px; letter-spacing: .25em; }
+  .batch-pill { padding: 3px 10px; font-size: 10px; }
 }
