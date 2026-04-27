@@ -100,6 +100,11 @@
       font-size: 14px;
     }
     th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    th.sortable { cursor: pointer; user-select: none; transition: color 0.15s; }
+    th.sortable:hover { color: var(--accent); }
+    th.sortable.active { color: var(--accent); }
+    th.sortable .sort-icon { color: var(--muted); margin-left: 4px; font-size: 11px; transition: color 0.15s; }
+    th.sortable.active .sort-icon { color: var(--accent); }
     tr:last-child td { border-bottom: 0; }
     td.qty { text-align: right; font-variant-numeric: tabular-nums; }
     td.expiry { font-variant-numeric: tabular-nums; }
@@ -115,6 +120,7 @@
     .badge.warn { background: rgba(241, 196, 15, 0.18); color: var(--warn); }
     .badge.ok { background: rgba(46, 204, 113, 0.18); color: var(--ok); }
     .badge.expired { background: var(--danger); color: #fff; }
+    .badge.dup { background: rgba(139, 147, 161, 0.20); color: var(--muted); }
 
     .delete-btn {
       background: transparent;
@@ -211,7 +217,9 @@
 
     tr.row-error td { background: rgba(231, 76, 60, 0.08); }
     tr.row-merge td { background: rgba(241, 196, 15, 0.06); }
+    tr.row-duplicate td { background: rgba(139, 147, 161, 0.05); opacity: 0.65; }
     .err-msg { color: var(--danger); font-size: 11px; }
+    .stat.dup .num { color: var(--muted); }
 
     .warn-banner {
       background: linear-gradient(135deg, rgba(231,76,60,0.12), rgba(241,196,15,0.10));
@@ -247,10 +255,56 @@
       color: var(--muted);
     }
 
-    @media (max-width: 480px) {
-      th, td { padding: 8px; font-size: 13px; }
-      th { font-size: 11px; }
+    @media (max-width: 600px) {
+      /* Header */
+      header { padding: 10px 12px; }
       header h1 { font-size: 16px; }
+      .user-info { gap: 6px; font-size: 12px; }
+      .user-info #user-email { display: none; } /* email 隱藏於手機 */
+      .user-info button { padding: 6px 10px; font-size: 13px; }
+
+      /* Nav 橫向滑動 */
+      nav { overflow-x: auto; scrollbar-width: none; }
+      nav::-webkit-scrollbar { display: none; }
+      nav button { flex: 0 0 auto; padding: 11px 16px; white-space: nowrap; font-size: 13px; }
+
+      main { padding: 12px; padding-bottom: 80px; }
+
+      /* Stat cards 縮小 */
+      .summary, .preview-summary { gap: 6px; }
+      .stat { padding: 8px 6px; }
+      .stat .num { font-size: 18px; }
+      .stat .label { font-size: 10px; }
+
+      /* Tables 緊湊 */
+      th, td { padding: 6px 8px; font-size: 13px; }
+      th { font-size: 10px; }
+
+      /* Forms：iOS 防自動放大 (font-size>=16px) + 大一點點觸控目標 */
+      input, select { font-size: 16px; padding: 11px 12px; }
+      label { font-size: 11px; }
+      button { font-size: 14px; }
+      .submit-btn { padding: 14px; min-height: 44px; }
+      .delete-btn { padding: 6px 12px; min-height: 32px; font-size: 13px; }
+
+      /* Auth banner */
+      #auth-banner { padding: 10px 12px !important; font-size: 13px; }
+
+      /* Toolbar：確保按鈕折行不擠 */
+      .toolbar { gap: 6px; }
+      .toolbar button { font-size: 12px; padding: 7px 10px; }
+
+      /* 警示 banner */
+      .warn-banner { padding: 10px 12px; gap: 8px; }
+      .warn-banner-text { font-size: 13px; }
+      .warn-banner .arrow { font-size: 12px; }
+
+      /* 上傳區 */
+      .upload-zone { padding: 20px 12px; }
+      .upload-zone p { font-size: 12px; }
+
+      /* 表頭排序 icon 在手機上更清楚 */
+      th.sortable .sort-icon { font-size: 12px; }
     }
   </style>
 </head>
@@ -258,6 +312,10 @@
   <div id="login-screen" class="login-box" style="display: none;">
     <h2>💊 藥品庫存</h2>
     <p>請使用授權的 Google 帳號登入</p>
+    <div id="ios-chrome-warn" style="display:none; background: rgba(241,196,15,0.15); border: 1px solid var(--warn); padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; line-height: 1.5;">
+      ⚠️ <strong>偵測到 iOS Chrome</strong> — Google 阻擋 Chrome 的 OAuth。請改用 <strong>Safari</strong> 開啟，或點下方按鈕：
+      <a id="open-in-safari" href="#" style="display: block; margin-top: 8px; color: var(--accent); text-decoration: underline;">→ 在 Safari 開啟</a>
+    </div>
     <button id="btn-login" style="width: 100%;">使用 Google 登入</button>
     <p id="login-error" style="color: var(--danger); display: none;"></p>
   </div>
@@ -295,7 +353,12 @@
         <input type="search" id="search-overview" placeholder="🔍 搜尋藥品名（不分大小寫）" autocomplete="off" style="margin-bottom: 12px;">
         <div class="scroll-x">
           <table>
-            <thead><tr><th>藥品</th><th class="qty">總庫存</th><th>最近效期</th><th>批次</th></tr></thead>
+            <thead><tr>
+              <th class="sortable" data-sort="drug">藥品 <span class="sort-icon">↕</span></th>
+              <th class="qty">總庫存</th>
+              <th class="sortable" data-sort="expiry">最近效期 <span class="sort-icon">↕</span></th>
+              <th>批次</th>
+            </tr></thead>
             <tbody id="tbody-overview"></tbody>
           </table>
         </div>
@@ -304,7 +367,10 @@
 
       <section id="view-warn" class="view">
         <p style="color: var(--muted); font-size: 13px; margin-top: 0;">依距離效期排序 — 越上面越緊急。</p>
-        <input type="search" id="search-warn" placeholder="🔍 搜尋藥品名" autocomplete="off" style="margin-bottom: 12px;">
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <input type="search" id="search-warn" placeholder="🔍 搜尋藥品名" autocomplete="off" style="flex: 1; margin-bottom: 0;">
+          <button id="btn-export-warn" style="flex: 0 0 auto;">📥 匯出 Excel</button>
+        </div>
         <div id="warn-sections"></div>
         <div id="empty-warn" class="empty">沒有近效或已過期的藥品 🎉</div>
       </section>
@@ -355,6 +421,7 @@
         <div class="toolbar">
           <button id="btn-template">📥 下載範本</button>
           <span style="flex: 1;"></span>
+          <button id="btn-clear-all" style="background: var(--danger);">🗑️ 清空全部</button>
         </div>
 
         <label for="file-input" class="upload-zone" id="upload-zone">
@@ -365,9 +432,10 @@
         </label>
 
         <div id="preview-area" style="display: none; margin-top: 16px;">
-          <div class="preview-summary">
+          <div class="preview-summary" style="grid-template-columns: repeat(4, 1fr);">
             <div class="stat ok"><div class="num" id="prev-new">0</div><div class="label">新批次</div></div>
-            <div class="stat merge"><div class="num" id="prev-merge">0</div><div class="label">合併</div></div>
+            <div class="stat merge"><div class="num" id="prev-update">0</div><div class="label">更新</div></div>
+            <div class="stat dup"><div class="num" id="prev-dup">0</div><div class="label">重複(略)</div></div>
             <div class="stat danger"><div class="num" id="prev-err">0</div><div class="label">錯誤</div></div>
           </div>
 
@@ -450,7 +518,9 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
     import {
-      getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
+      getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
+      reauthenticateWithPopup,
+      signInWithRedirect, reauthenticateWithRedirect, getRedirectResult
     } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
     import {
       getFirestore, collection, addDoc, updateDoc, deleteDoc, doc,
@@ -472,10 +542,47 @@
     const db = getFirestore(app);
     const provider = new GoogleAuthProvider();
     provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+    // 不設 prompt：Google 會記住授權，重新驗證時通常一閃而過不再跳同意畫面
 
-    // OAuth access token for Sheets API (captured at login, lost on page refresh)
+    // 手機用 redirect（popup 容易被擋），桌機用 popup（不打斷）
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile|webOS/i.test(navigator.userAgent);
+    const isIOSChrome = /CriOS/i.test(navigator.userAgent);
+
+    // iOS Chrome：Google OAuth 視為嵌入式瀏覽器，建議用 Safari
+    if (isIOSChrome) {
+      window.addEventListener('DOMContentLoaded', () => {
+        const warn = document.getElementById('ios-chrome-warn');
+        if (warn) warn.style.display = 'block';
+        const safariLink = document.getElementById('open-in-safari');
+        if (safariLink) {
+          // 用 x-safari- URL scheme 開 Safari（iOS 支援）
+          safariLink.href = 'x-safari-' + location.href;
+        }
+      });
+    }
+
+    // redirect 流程返回時，從 getRedirectResult 取得 OAuth credential
+    getRedirectResult(auth).then(result => {
+      if (!result) return;
+      const cred = GoogleAuthProvider.credentialFromResult(result);
+      if (cred?.accessToken) {
+        sheetsAccessToken = cred.accessToken;
+        try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
+        console.log('[Auth] redirect 返回，token 取得');
+      }
+    }).catch(e => console.error('[Auth] redirect result error:', e));
+
+    // ===== Module state（要在所有 event handler 與 async 程式之前宣告，避免 TDZ）=====
     let sheetsAccessToken = null;
     try { sheetsAccessToken = sessionStorage.getItem('sheetsAccessToken'); } catch {}
+    let allBatches = [];
+    let allIntakeLogs = [];
+    let allDispenseLogs = [];
+    let overviewSortMode = 'expiry-asc';
+    let syncSheetId = null;
+    let syncTimer = null;
+    let isSyncing = false;
+    let syncEnabled = true;
 
     const $ = (id) => document.getElementById(id);
     const toast = (msg, isError = false) => {
@@ -486,33 +593,47 @@
     };
 
     // ===== Auth =====
+    // banner 已移除，保留 no-op 函式避免 caller 報錯
+    function showAuthBanner() {}
+    function hideAuthBanner() {}
+    function setAuthBannerText() {}
+    console.log('[App] v2026-04-27 載入，當前 sheetsAccessToken =', sheetsAccessToken ? `(有，${sheetsAccessToken.length}字元)` : '(無)');
+
     onAuthStateChanged(auth, (user) => {
       if (user) {
         $('login-screen').style.display = 'none';
         $('app').style.display = 'block';
         $('user-email').textContent = user.email;
-        // 顯示 Sheet 按鈕（不論有沒有授權 token）
         $('btn-sheet').style.display = 'inline';
         if (!sheetsAccessToken) {
           setSyncStatus('需授權', 'err');
+          showAuthBanner();
           $('btn-sheet').onclick = async (ev) => {
             ev.preventDefault();
             const ok = await reauthForSheets();
-            if (ok) syncToSheet();
+            if (ok) { hideAuthBanner(); syncToSheet(); }
           };
         } else {
           setSyncStatus('準備中…', 'busy');
+          hideAuthBanner();
         }
         subscribeBatches();
       } else {
         $('login-screen').style.display = 'block';
         $('app').style.display = 'none';
         $('btn-sheet').style.display = 'none';
+        hideAuthBanner();
       }
     });
 
     $('btn-login').onclick = async () => {
       try {
+        // 手機：直接 redirect（popup 在 iOS 會被 Google OAuth 視為 disallowed_useragent）
+        if (isMobile) {
+          await signInWithRedirect(auth, provider);
+          return;
+        }
+        // 桌機：popup
         const result = await signInWithPopup(auth, provider);
         const cred = GoogleAuthProvider.credentialFromResult(result);
         if (cred?.accessToken) {
@@ -520,7 +641,7 @@
           try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
         }
       } catch (e) {
-        $('login-error').textContent = '登入失敗：' + e.message;
+        $('login-error').textContent = '登入失敗：' + (e.code || '') + ' ' + e.message;
         $('login-error').style.display = 'block';
       }
     };
@@ -532,16 +653,38 @@
 
     // Re-auth helper to refresh Sheets access token after page reload
     async function reauthForSheets() {
+      let stage = '開始';
       try {
-        const result = await signInWithPopup(auth, provider);
-        const cred = GoogleAuthProvider.credentialFromResult(result);
-        if (cred?.accessToken) {
-          sheetsAccessToken = cred.accessToken;
-          try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
-          return true;
+        // 手機：直接 redirect
+        if (isMobile) {
+          stage = 'redirect';
+          if (auth.currentUser) {
+            await reauthenticateWithRedirect(auth.currentUser, provider);
+          } else {
+            await signInWithRedirect(auth, provider);
+          }
+          return false;
         }
+        // 桌機：popup
+        let result;
+        if (auth.currentUser) {
+          stage = 'reauthenticateWithPopup';
+          result = await reauthenticateWithPopup(auth.currentUser, provider);
+        } else {
+          stage = 'signInWithPopup';
+          result = await signInWithPopup(auth, provider);
+        }
+        stage = 'credentialFromResult';
+        const cred = GoogleAuthProvider.credentialFromResult(result);
+        if (!cred) { toast(`OAuth credential 為 null（${stage}）`, true); return false; }
+        if (!cred.accessToken) { toast('OAuth token 為空（GCP Consent Screen 沒加 spreadsheets scope？）', true); return false; }
+        sheetsAccessToken = cred.accessToken;
+        try { sessionStorage.setItem('sheetsAccessToken', cred.accessToken); } catch {}
+        toast(`✅ 已授權`);
+        return true;
       } catch (e) {
-        toast('Sheet 授權失敗：' + e.message, true);
+        toast(`授權失敗 @${stage}: ${(e.code || e.message || e).toString().slice(0, 100)}`, true);
+        console.error('reauth error:', e);
       }
       return false;
     }
@@ -561,19 +704,92 @@
     $('search-batches').addEventListener('input', () => renderBatches());
     $('search-warn').addEventListener('input', () => renderNearExpiry());
 
+    // 近效匯出 Excel（受搜尋過濾影響）
+    $('btn-export-warn').onclick = () => {
+      const q = ($('search-warn')?.value || '').trim().toLowerCase();
+      const rows = [['類別', '藥品', '數量', '單位', '效期', '進貨日期', '距效期(天)']];
+      for (const sec of WARN_SECTIONS) {
+        const items = allBatches
+          .filter(b => sec.test(expiryDays(b.expiry)))
+          .filter(b => !q || (b.drug || '').toLowerCase().includes(q))
+          .sort((a, b) => a.expiry.toMillis() - b.expiry.toMillis());
+        for (const b of items) {
+          rows.push([
+            sec.title,
+            b.drug,
+            b.quantity == null ? '' : b.quantity,
+            b.unit || '',
+            fmtDateOrEmpty(b.expiry),
+            fmtDateOrEmpty(b.in_date),
+            expiryDays(b.expiry)
+          ]);
+        }
+      }
+      if (rows.length === 1) { toast('沒有資料可匯出', true); return; }
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols'] = [{wch:14},{wch:28},{wch:8},{wch:8},{wch:12},{wch:12},{wch:10}];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, '近效藥品');
+      const today = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `近效藥品_${today}.xlsx`);
+      toast(`✅ 已匯出 ${rows.length - 1} 筆`);
+    };
+
+    // ===== Column-header sort (Excel-style) =====
+    function updateSortIcons() {
+      document.querySelectorAll('th.sortable').forEach(th => {
+        const col = th.dataset.sort;
+        const icon = th.querySelector('.sort-icon');
+        if (overviewSortMode === `${col}-asc`) {
+          icon.textContent = '↑'; th.classList.add('active');
+        } else if (overviewSortMode === `${col}-desc`) {
+          icon.textContent = '↓'; th.classList.add('active');
+        } else {
+          icon.textContent = '↕'; th.classList.remove('active');
+        }
+      });
+    }
+    document.querySelectorAll('th.sortable').forEach(th => {
+      th.addEventListener('click', () => {
+        const col = th.dataset.sort;
+        overviewSortMode = (overviewSortMode === `${col}-asc`) ? `${col}-desc` : `${col}-asc`;
+        updateSortIcons();
+        renderOverview();
+      });
+    });
+    updateSortIcons(); // initial
+
     // ===== Banner click → jump to warn tab =====
     $('warn-banner').addEventListener('click', () => {
       document.querySelector('nav button[data-view="warn"]').click();
     });
 
     // ===== Data =====
-    let allBatches = [];
-    let allIntakeLogs = [];
-    let allDispenseLogs = [];
+    async function clearAllData() {
+      if (!confirm(`真的要刪除所有 ${allBatches.length} 個批次 + ${allIntakeLogs.length} 筆進貨記錄 + ${allDispenseLogs.length} 筆出貨記錄？這無法復原。`)) return;
+      const allDocs = [
+        ...allBatches.map(b => ({ col: 'batches', id: b.id })),
+        ...allIntakeLogs.map(l => ({ col: 'intake_logs', id: l.id })),
+        ...allDispenseLogs.map(l => ({ col: 'dispense_logs', id: l.id }))
+      ];
+      const CHUNK = 500;
+      let done = 0;
+      for (let i = 0; i < allDocs.length; i += CHUNK) {
+        const chunk = allDocs.slice(i, i + CHUNK);
+        const b = writeBatch(db);
+        for (const d of chunk) b.delete(doc(db, d.col, d.id));
+        await b.commit();
+        done += chunk.length;
+        console.log(`已刪 ${done}/${allDocs.length}`);
+      }
+      toast(`✅ 已清空所有資料（${allDocs.length} 筆）`);
+    }
 
     function subscribeBatches() {
       onSnapshot(query(collection(db, 'batches'), orderBy('expiry', 'asc')), (snap) => {
         allBatches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        window.__debug = { allBatches, allIntakeLogs, allDispenseLogs, clearAll: clearAllData };
+        console.log('[Snapshot] allBatches 更新，共', allBatches.length, '個 batch');
         renderOverview();
         renderBatches();
         renderNearExpiry();
@@ -638,7 +854,13 @@
 
       const searchInput = $('search-overview');
       const q = (searchInput?.value || '').trim().toLowerCase();
-      let sorted = [...grouped.entries()].sort((a, b) => a[1].expiry.toMillis() - b[1].expiry.toMillis());
+      let sorted = [...grouped.entries()];
+      switch (overviewSortMode) {
+        case 'expiry-asc':  sorted.sort((a, b) => a[1].expiry.toMillis() - b[1].expiry.toMillis()); break;
+        case 'expiry-desc': sorted.sort((a, b) => b[1].expiry.toMillis() - a[1].expiry.toMillis()); break;
+        case 'drug-asc':    sorted.sort((a, b) => a[0].localeCompare(b[0], 'en', { sensitivity: 'base' })); break;
+        case 'drug-desc':   sorted.sort((a, b) => b[0].localeCompare(a[0], 'en', { sensitivity: 'base' })); break;
+      }
       if (q) sorted = sorted.filter(([drug]) => drug.toLowerCase().includes(q));
 
       tbody.innerHTML = '';
@@ -799,39 +1021,50 @@
 
     // ===== Add or merge batch (shared by manual + upload) =====
     function expiryKeyFromDate(d) {
-      // Use yyyy-mm-dd in local time as merge key
       const y = d.getFullYear();
       const m = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
       return `${y}-${m}-${day}`;
     }
-    function findExistingBatch(drug, expiryDate) {
-      const key = expiryKeyFromDate(expiryDate);
-      return allBatches.find(b => b.drug === drug && fmtDate(b.expiry) === key);
+    function tsToDate(ts) {
+      if (!ts) return null;
+      return ts.toDate ? ts.toDate() : new Date(ts);
     }
-    async function addOrMergeBatch({ drug, quantity, unit, expiry, in_date }) {
-      // quantity 可為 null（未盤）；unit 可為空字串
+    // 唯一鍵 = (藥品 + 效期 + 進貨日期)
+    function findExistingBatch(drug, expiry, in_date) {
+      const expKey = expiry ? expiryKeyFromDate(expiry) : '';
+      const inKey = in_date ? expiryKeyFromDate(in_date) : '';
+      return allBatches.find(b => {
+        if (b.drug !== drug) return false;
+        const bExp = tsToDate(b.expiry);
+        const bIn = tsToDate(b.in_date);
+        return (bExp ? expiryKeyFromDate(bExp) : '') === expKey
+            && (bIn ? expiryKeyFromDate(bIn) : '') === inKey;
+      });
+    }
+    function isSameBatchData(existing, qty, unit) {
+      const existingQty = existing.quantity;
+      const sameQty = (existingQty == null && qty == null)
+                   || (existingQty != null && qty != null && Number(existingQty) === Number(qty));
+      const sameUnit = (existing.unit || '') === (unit || '');
+      return sameQty && sameUnit;
+    }
+    async function addOrUpdateBatch({ drug, quantity, unit, expiry, in_date }) {
       const qtyNorm = (quantity == null || quantity === '') ? null : Number(quantity);
       const unitNorm = (unit || '').trim();
-      const existing = findExistingBatch(drug, expiry);
+      const existing = findExistingBatch(drug, expiry, in_date);
       let action;
       if (existing) {
-        if (existing.unit && unitNorm && existing.unit !== unitNorm) {
-          throw new Error(`單位不符（既有「${existing.unit}」vs 新「${unitNorm}」）`);
+        if (isSameBatchData(existing, qtyNorm, unitNorm)) {
+          return 'duplicate'; // 完全一樣 → 不寫 doc、不寫 log
         }
-        const mergedUnit = existing.unit || unitNorm || '';
-        // 任一邊為 null 時保留另一邊；都為 null 時為 null；都有則相加
-        let mergedQty;
-        if (existing.quantity == null && qtyNorm == null) mergedQty = null;
-        else mergedQty = Number(existing.quantity || 0) + Number(qtyNorm || 0);
         await updateDoc(doc(db, 'batches', existing.id), {
-          quantity: mergedQty,
-          unit: mergedUnit,
-          last_in_date: in_date ? Timestamp.fromDate(in_date) : (existing.last_in_date || null),
+          quantity: qtyNorm,
+          unit: unitNorm,
           last_updated_at: serverTimestamp(),
           last_updated_by: auth.currentUser.email
         });
-        action = 'merged';
+        action = 'updated';
       } else {
         await addDoc(collection(db, 'batches'), {
           drug,
@@ -844,11 +1077,8 @@
         });
         action = 'added';
       }
-      // 寫進貨紀錄
       await addDoc(collection(db, 'intake_logs'), {
-        drug,
-        quantity: qtyNorm,
-        unit: unitNorm,
+        drug, quantity: qtyNorm, unit: unitNorm,
         expiry: Timestamp.fromDate(expiry),
         in_date: in_date ? Timestamp.fromDate(in_date) : null,
         action,
@@ -878,13 +1108,16 @@
         return;
       }
       try {
-        const result = await addOrMergeBatch({
+        const result = await addOrUpdateBatch({
           drug, quantity, unit,
           expiry: new Date(expiryStr),
           in_date: inDateStr ? new Date(inDateStr) : null
         });
         e.target.reset();
-        toast(result === 'merged' ? `已合併到既有批次：${drug}` : `已新增：${drug}`);
+        const msg = result === 'duplicate' ? `已存在相同資料：${drug}（未變更）`
+                  : result === 'updated' ? `已更新：${drug}`
+                  : `已新增：${drug}`;
+        toast(msg);
         document.querySelector('nav button[data-view="overview"]').click();
       } catch (err) {
         toast('失敗：' + err.message, true);
@@ -942,14 +1175,20 @@
       const r = { rowNum: idx + 2, drug, quantity, unit, expiry, in_date, errors, status: 'new' };
       if (errors.length) { r.status = 'error'; return r; }
 
-      const existing = findExistingBatch(drug, expiry);
+      // 唯一鍵 (drug + expiry + in_date) 比對既有 batch
+      const existing = findExistingBatch(drug, expiry, in_date);
       if (existing) {
-        if (existing.unit && unit && existing.unit !== unit) {
-          r.status = 'error';
-          r.errors.push(`單位與既有不符（${existing.unit}）`);
+        console.log('[Dedup] 第', idx + 2, '行匹配既有 batch：',
+          { row: { drug, expiry, in_date, quantity, unit } },
+          { batch: { id: existing.id, drug: existing.drug, expiry: existing.expiry?.toDate?.(), in_date: existing.in_date?.toDate?.(), quantity: existing.quantity, unit: existing.unit } }
+        );
+        if (isSameBatchData(existing, quantity, unit)) {
+          r.status = 'duplicate';
         } else {
-          r.status = 'merge';
-          r.mergeTarget = existing;
+          r.status = 'update';
+          r.updateTarget = existing;
+          r.oldQuantity = existing.quantity;
+          r.oldUnit = existing.unit;
         }
       }
       return r;
@@ -958,23 +1197,29 @@
     function renderPreview(rows) {
       pendingRows = rows;
       const tbody = $('tbody-preview');
-      let nNew = 0, nMerge = 0, nErr = 0;
+      let nNew = 0, nUpd = 0, nDup = 0, nErr = 0;
       tbody.innerHTML = rows.map(r => {
         if (r.status === 'new') nNew++;
-        else if (r.status === 'merge') nMerge++;
+        else if (r.status === 'update') nUpd++;
+        else if (r.status === 'duplicate') nDup++;
         else nErr++;
 
         const expStr = r.expiry ? expiryKeyFromDate(r.expiry) : '—';
         const inStr = r.in_date ? expiryKeyFromDate(r.in_date) : '—';
-        const mergeQtyTxt = r.status === 'merge'
-          ? (r.quantity == null ? '合併（不變）' : `合併 +${r.quantity}`)
-          : '';
+        const qtyDisp = r.quantity == null ? '未盤' : r.quantity;
+        const oldQtyDisp = r.oldQuantity == null ? '未盤' : r.oldQuantity;
+        const updTxt = r.status === 'update' ? `更新 ${oldQtyDisp}→${qtyDisp}` : '';
         const badge = r.status === 'new' ? '<span class="badge ok">新</span>'
-                    : r.status === 'merge' ? `<span class="badge warn">${mergeQtyTxt}</span>`
+                    : r.status === 'update' ? `<span class="badge warn">${updTxt}</span>`
+                    : r.status === 'duplicate' ? '<span class="badge dup">重複（略）</span>'
                     : `<span class="badge expired">錯</span>`;
         const errMsg = r.errors.length ? `<div class="err-msg">${r.errors.join('、')}</div>` : '';
         const qtyCell = r.quantity == null ? '—' : r.quantity;
-        return `<tr class="row-${r.status === 'error' ? 'error' : (r.status === 'merge' ? 'merge' : '')}">
+        const rowCls = r.status === 'error' ? 'row-error'
+                     : r.status === 'update' ? 'row-merge'
+                     : r.status === 'duplicate' ? 'row-duplicate'
+                     : '';
+        return `<tr class="${rowCls}">
           <td>${badge}${errMsg}</td>
           <td>${r.drug || '—'}</td>
           <td class="qty">${qtyCell}</td>
@@ -984,11 +1229,17 @@
         </tr>`;
       }).join('');
       $('prev-new').textContent = nNew;
-      $('prev-merge').textContent = nMerge;
+      $('prev-update').textContent = nUpd;
+      $('prev-dup').textContent = nDup;
       $('prev-err').textContent = nErr;
       $('preview-area').style.display = 'block';
-      $('btn-import').textContent = `確認匯入 ${nNew + nMerge} 筆` + (nErr ? `（跳過 ${nErr} 筆錯誤）` : '');
-      $('btn-import').disabled = (nNew + nMerge) === 0;
+      const importable = nNew + nUpd;
+      const skipParts = [];
+      if (nDup) skipParts.push(`${nDup} 重複`);
+      if (nErr) skipParts.push(`${nErr} 錯誤`);
+      $('btn-import').textContent = `確認匯入 ${importable} 筆`
+        + (skipParts.length ? `（跳過 ${skipParts.join(' + ')}）` : '');
+      $('btn-import').disabled = importable === 0;
     }
 
     function handleFile(file) {
@@ -1036,26 +1287,111 @@
     };
 
     $('btn-import').onclick = async () => {
-      const valid = pendingRows.filter(r => r.status !== 'error');
+      const valid = pendingRows.filter(r => r.status === 'new' || r.status === 'update');
       if (!valid.length) return;
       $('btn-import').disabled = true;
-      $('btn-import').textContent = '匯入中…';
-      let ok = 0, fail = 0;
-      for (const r of valid) {
-        try {
-          await addOrMergeBatch({
-            drug: r.drug, quantity: r.quantity, unit: r.unit,
-            expiry: r.expiry, in_date: r.in_date
-          });
-          ok++;
-        } catch (err) {
-          fail++;
-          console.error('Import row failed:', r, err);
+      $('btn-import').textContent = '處理中…';
+
+      const wasSyncEnabled = syncEnabled;
+      syncEnabled = false;
+
+      try {
+        const userEmail = auth.currentUser.email;
+
+        // 'new' 同檔內以唯一鍵去重，最後一個獲勝（避免兩行 addDoc 造成重複批次）
+        const newByKey = new Map();
+        const updateRows = [];
+        for (const r of valid) {
+          if (r.status === 'new') {
+            const k = `${r.drug}|${expiryKeyFromDate(r.expiry)}|${r.in_date ? expiryKeyFromDate(r.in_date) : ''}`;
+            newByKey.set(k, r); // last wins
+          } else {
+            updateRows.push(r);
+          }
         }
+        const newRows = [...newByKey.values()];
+
+        const ops = [];
+        for (const r of newRows) {
+          ops.push({
+            type: 'set',
+            ref: doc(collection(db, 'batches')),
+            data: {
+              drug: r.drug,
+              quantity: r.quantity,
+              unit: r.unit,
+              expiry: Timestamp.fromDate(r.expiry),
+              in_date: r.in_date ? Timestamp.fromDate(r.in_date) : null,
+              created_at: serverTimestamp(),
+              created_by: userEmail
+            }
+          });
+          ops.push({
+            type: 'set',
+            ref: doc(collection(db, 'intake_logs')),
+            data: {
+              drug: r.drug, quantity: r.quantity, unit: r.unit,
+              expiry: Timestamp.fromDate(r.expiry),
+              in_date: r.in_date ? Timestamp.fromDate(r.in_date) : null,
+              action: 'added',
+              at: serverTimestamp(), by: userEmail
+            }
+          });
+        }
+        for (const r of updateRows) {
+          ops.push({
+            type: 'update',
+            ref: doc(db, 'batches', r.updateTarget.id),
+            data: {
+              quantity: r.quantity,
+              unit: r.unit,
+              last_updated_at: serverTimestamp(),
+              last_updated_by: userEmail
+            }
+          });
+          ops.push({
+            type: 'set',
+            ref: doc(collection(db, 'intake_logs')),
+            data: {
+              drug: r.drug, quantity: r.quantity, unit: r.unit,
+              expiry: Timestamp.fromDate(r.expiry),
+              in_date: r.in_date ? Timestamp.fromDate(r.in_date) : null,
+              action: 'updated',
+              at: serverTimestamp(), by: userEmail
+            }
+          });
+        }
+
+        const CHUNK = 500;
+        let committedOps = 0, failedOps = 0;
+        for (let i = 0; i < ops.length; i += CHUNK) {
+          const chunk = ops.slice(i, i + CHUNK);
+          $('btn-import').textContent = `匯入中… ${i}/${ops.length}`;
+          const batch = writeBatch(db);
+          for (const op of chunk) {
+            if (op.type === 'update') batch.update(op.ref, op.data);
+            else batch.set(op.ref, op.data);
+          }
+          try {
+            await batch.commit();
+            committedOps += chunk.length;
+          } catch (e) {
+            console.error('Batch commit failed:', e);
+            failedOps += chunk.length;
+          }
+        }
+
+        const summary = `${newRows.length} 新增、${updateRows.length} 更新（${committedOps} ops${failedOps ? `, ${failedOps} 失敗` : ''}）`;
+        toast(`匯入完成：${summary}`, failedOps > 0);
+      } catch (e) {
+        toast('匯入失敗：' + e.message, true);
+        console.error(e);
+      } finally {
+        syncEnabled = wasSyncEnabled;
+        scheduleSync();
+        $('btn-cancel').click();
+        document.querySelector('nav button[data-view="overview"]').click();
       }
-      toast(`匯入完成：${ok} 筆${fail ? `，失敗 ${fail} 筆` : ''}`, fail > 0);
-      $('btn-cancel').click();
-      document.querySelector('nav button[data-view="overview"]').click();
     };
 
     // ===== Dispense (FIFO) =====
@@ -1145,6 +1481,8 @@
         toast('出貨失敗：' + err.message, true);
       }
     };
+
+    $('btn-clear-all').onclick = clearAllData;
 
     // 出貨範本下載
     $('btn-dispense-template').onclick = () => {
@@ -1316,16 +1654,26 @@
     const TAB_DISPENSE = '出貨紀錄';
     const ALL_TABS = [TAB_INVENTORY, TAB_NEAR_EXPIRY, TAB_INTAKE, TAB_DISPENSE];
 
-    let syncSheetId = null;
-    let syncTimer = null;
-    let isSyncing = false;
-    let syncEnabled = true;
-
     function setSyncStatus(text, kind) {
       const el = $('sync-status');
-      if (!el) return;
+      const btn = $('btn-sheet');
+      if (!el || !btn) return;
       el.textContent = text;
       el.style.color = kind === 'err' ? 'var(--danger)' : kind === 'ok' ? 'var(--ok)' : kind === 'busy' ? 'var(--warn)' : 'var(--muted)';
+      // err 狀態：把 📊 整顆變成明顯的紅框按鈕，提示可點擊重新授權
+      if (kind === 'err') {
+        btn.style.padding = '4px 10px';
+        btn.style.border = '1px solid var(--danger)';
+        btn.style.borderRadius = '6px';
+        btn.style.background = 'rgba(231,76,60,0.10)';
+        btn.title = '點此重新授權 Sheet 同步';
+      } else {
+        btn.style.padding = '';
+        btn.style.border = '';
+        btn.style.borderRadius = '';
+        btn.style.background = '';
+        btn.title = '開啟同步 Sheet';
+      }
     }
 
     async function sheetsApi(path, method = 'GET', body = null) {
@@ -1444,7 +1792,7 @@
         l.by || '',
         l.drug, l.quantity, l.unit,
         fmtDateOrEmpty(l.expiry), fmtDateOrEmpty(l.in_date),
-        l.action === 'merged' ? '合併' : '新增'
+        l.action === 'updated' ? '更新' : (l.action === 'merged' ? '合併' : '新增')
       ]);
       return [headers, ...rows];
     }
@@ -1498,11 +1846,13 @@
         setSyncStatus(`已同步 ${ts}`, 'ok');
         $('btn-sheet').style.display = 'inline';
         $('btn-sheet').onclick = null;
+        hideAuthBanner();
       } catch (e) {
         if (e.message === 'NO_TOKEN' || e.message === 'TOKEN_EXPIRED') {
           setSyncStatus('需重新授權', 'err');
           $('btn-sheet').style.display = 'inline';
           $('btn-sheet').onclick = async (ev) => { ev.preventDefault(); await reauthForSheets(); syncToSheet(); };
+          showAuthBanner();
         } else {
           setSyncStatus('同步失敗', 'err');
           // 把完整錯誤顯示給使用者
