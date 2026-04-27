@@ -556,7 +556,8 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
     const provider = new GoogleAuthProvider();
-    provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+    // 登入只用基本 scope（email、profile）— 加 spreadsheets 會觸發 Google disallowed_useragent 擋手機
+    // Sheet token 之後另外用 GIS 取得（見下方）
     // 不設 prompt：Google 會記住授權，重新驗證時通常一閃而過不再跳同意畫面
 
     // 手機用 redirect（popup 容易被擋），桌機用 popup（不打斷）
