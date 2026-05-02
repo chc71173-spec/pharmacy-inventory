@@ -219,7 +219,19 @@
     tr.row-error td { background: rgba(231, 76, 60, 0.08); }
     tr.row-merge td { background: rgba(241, 196, 15, 0.06); }
     tr.row-duplicate td { background: rgba(139, 147, 161, 0.05); opacity: 0.65; }
+    tr.row-fuzzy td { background: rgba(95, 158, 160, 0.10); }
     .err-msg { color: var(--danger); font-size: 11px; }
+    .fuzzy-suggest {
+      margin-top: 4px;
+      padding: 4px 8px;
+      background: rgba(95, 158, 160, 0.15);
+      border-left: 3px solid #5f9ea0;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .fuzzy-suggest label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .fuzzy-suggest input[type="checkbox"] { margin: 0; cursor: pointer; }
+    .fuzzy-suggest .muted { color: var(--muted); font-size: 11px; }
     .stat.dup .num { color: var(--muted); }
 
     .warn-banner {
@@ -339,39 +351,13 @@
     </header>
 
     <nav>
-      <button data-view="overview" class="active">庫存總覽</button>
+      <button data-view="batches" class="active">批次明細</button>
       <button data-view="warn">⚠️ 近效</button>
-      <button data-view="batches">批次明細</button>
       <button data-view="intake">進貨</button>
       <button data-view="dispense">出貨</button>
     </nav>
 
     <main>
-      <section id="view-overview" class="view active">
-        <div id="warn-banner" class="warn-banner" style="display:none;">
-          <div class="warn-banner-text" id="warn-banner-text"></div>
-          <div class="arrow">查看 →</div>
-        </div>
-        <div class="summary">
-          <div class="stat"><div class="num" id="stat-drugs">0</div><div class="label">藥品種類</div></div>
-          <div class="stat warn"><div class="num" id="stat-warn">0</div><div class="label">≤6 個月效期</div></div>
-          <div class="stat danger"><div class="num" id="stat-expired">0</div><div class="label">已過期</div></div>
-        </div>
-        <input type="search" id="search-overview" placeholder="🔍 搜尋藥品名（不分大小寫）" autocomplete="off" style="margin-bottom: 12px;">
-        <div class="scroll-x">
-          <table>
-            <thead><tr>
-              <th class="sortable" data-sort="drug" data-en="DRUG">藥品 <span class="sort-icon">↕</span></th>
-              <th class="qty" data-en="STOCK">總庫存</th>
-              <th class="sortable" data-sort="expiry" data-en="EXPIRY">最近效期 <span class="sort-icon">↕</span></th>
-              <th data-en="LOT">批次</th>
-            </tr></thead>
-            <tbody id="tbody-overview"></tbody>
-          </table>
-        </div>
-        <div id="empty-overview" class="empty">尚無資料，請先到「進貨」分頁新增或上傳。</div>
-      </section>
-
       <section id="view-warn" class="view">
         <p style="color: var(--muted); font-size: 13px; margin-top: 0;">依距離效期排序 — 越上面越緊急。</p>
         <div style="display: flex; gap: 8px; margin-bottom: 12px;">
@@ -382,12 +368,26 @@
         <div id="empty-warn" class="empty">沒有近效或已過期的藥品 🎉</div>
       </section>
 
-      <section id="view-batches" class="view">
+      <section id="view-batches" class="view active">
+        <div id="warn-banner" class="warn-banner" style="display:none;">
+          <div class="warn-banner-text" id="warn-banner-text"></div>
+          <div class="arrow">查看 →</div>
+        </div>
+        <div class="summary">
+          <div class="stat"><div class="num" id="stat-drugs">0</div><div class="label">藥品種類</div></div>
+          <div class="stat warn"><div class="num" id="stat-warn">0</div><div class="label">≤6 個月效期</div></div>
+          <div class="stat danger"><div class="num" id="stat-expired">0</div><div class="label">已過期</div></div>
+        </div>
         <p style="color: var(--muted); font-size: 13px; margin-top: 0;">依效期排序（先進先出 FIFO）— 紅色 = 已過期、黃色 = ≤ 6 個月。</p>
         <input type="search" id="search-batches" placeholder="🔍 搜尋藥品名" autocomplete="off" style="margin-bottom: 12px;">
         <div class="scroll-x">
           <table>
-            <thead><tr><th>藥品</th><th class="qty">數量</th><th>效期</th><th></th></tr></thead>
+            <thead><tr>
+              <th class="sortable" data-sort="drug">藥品 <span class="sort-icon">↕</span></th>
+              <th class="qty">數量</th>
+              <th class="sortable" data-sort="expiry">效期 <span class="sort-icon">↕</span></th>
+              <th></th>
+            </tr></thead>
             <tbody id="tbody-batches"></tbody>
           </table>
         </div>
@@ -630,7 +630,7 @@
     let allBatches = [];
     let allIntakeLogs = [];
     let allDispenseLogs = [];
-    let overviewSortMode = 'expiry-asc';
+    let batchesSortMode = 'expiry-asc';
     let syncSheetId = null;
     let syncTimer = null;
     let isSyncing = false;
@@ -651,6 +651,83 @@
       const cleaned = String(s).replace(/[\s\u3000]+/g, ' ').trim();
       if (!cleaned) return '';
       return cleaned[0].toUpperCase() + cleaned.slice(1).toLowerCase();
+    }
+
+    // ===== Fuzzy drug name matching（匯入 preview 階段建議候選） =====
+    // 編輯距離（Levenshtein）DP 標準實作
+    function levenshtein(a, b) {
+      if (a === b) return 0;
+      if (!a.length) return b.length;
+      if (!b.length) return a.length;
+      let prev = new Array(b.length + 1);
+      let curr = new Array(b.length + 1);
+      for (let j = 0; j <= b.length; j++) prev[j] = j;
+      for (let i = 1; i <= a.length; i++) {
+        curr[0] = i;
+        for (let j = 1; j <= b.length; j++) {
+          const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+          curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+        }
+        [prev, curr] = [curr, prev];
+      }
+      return prev[b.length];
+    }
+
+    // 剝掉常見藥房後綴（劑型、劑量、單位）後再 normalize
+    // FC = Film-Coated；Tab = Tablet；Cap = Capsule
+    const SUFFIX_RE = /\s+(?:fc|tab|tabs|tablet|tablets|cap|caps|capsule|capsules|\d+(?:\.\d+)?\s*(?:mg|g|mcg|µg|ug|ml|顆|錠|粒|片|包|瓶|盒))$/i;
+    function stripSuffixes(s) {
+      let t = normalizeDrugName(s);
+      // 反覆剝（"Aricept 10mg FC" → "Aricept 10mg" → "Aricept"）
+      let prev;
+      do {
+        prev = t;
+        t = t.replace(SUFFIX_RE, '').trim();
+      } while (t !== prev && t.length > 0);
+      return t;
+    }
+
+    // 在 candidates（已 normalize 的字串陣列）中找最相近的候選
+    // 規則優先順序：1) 後綴剝除後相同 → 2) 包含關係 → 3) Levenshtein ≤ 2
+    // 返回 { candidate, reason } 或 null（input 已 exact match 時也回 null）
+    function fuzzyFindCandidate(input, candidates) {
+      if (!input || !candidates?.length) return null;
+      const inputNorm = normalizeDrugName(input);
+      // exact match → 不需建議（走原本的 findExistingBatch 流程）
+      if (candidates.includes(inputNorm)) return null;
+      const inputStripped = stripSuffixes(inputNorm);
+
+      // Rule 1: 後綴剝除後相同（最精準）
+      for (const c of candidates) {
+        if (stripSuffixes(c) === inputStripped && c !== inputNorm) {
+          // 找出剝掉的部分當 reason 訊息
+          const removed = inputNorm.length > c.length
+            ? inputNorm.slice(c.length).trim() || c.slice(inputNorm.length).trim()
+            : c.slice(inputNorm.length).trim() || inputNorm.slice(c.length).trim();
+          return { candidate: c, reason: removed ? `去除後綴「${removed}」後相同` : '去除後綴後相同' };
+        }
+      }
+
+      // Rule 2: 包含關係（長度差 ≥ 3 字避免短字雜訊）
+      for (const c of candidates) {
+        const longer = c.length >= inputNorm.length ? c : inputNorm;
+        const shorter = c.length >= inputNorm.length ? inputNorm : c;
+        if (longer.length - shorter.length >= 3 && longer.toLowerCase().includes(shorter.toLowerCase())) {
+          return { candidate: c, reason: '包含關係' };
+        }
+      }
+
+      // Rule 3: Levenshtein ≤ 2（input 需 ≥ 4 字避免短字 false positive）
+      if (inputNorm.length >= 4) {
+        let best = null, bestDist = Infinity;
+        for (const c of candidates) {
+          if (c.length < 4) continue;
+          const d = levenshtein(c.toLowerCase(), inputNorm.toLowerCase());
+          if (d <= 2 && d < bestDist) { best = c; bestDist = d; }
+        }
+        if (best) return { candidate: best, reason: `拼字相近（距離 ${bestDist}）` };
+      }
+      return null;
     }
 
     // ===== Auth =====
@@ -745,7 +822,6 @@
     });
 
     // ===== Search =====
-    $('search-overview').addEventListener('input', () => renderOverview());
     $('search-batches').addEventListener('input', () => renderBatches());
     $('search-warn').addEventListener('input', () => renderNearExpiry());
 
@@ -780,26 +856,26 @@
       toast(`✅ 已匯出 ${rows.length - 1} 筆`);
     };
 
-    // ===== Column-header sort (Excel-style) =====
+    // ===== Column-header sort (Excel-style) — 批次明細 =====
     function updateSortIcons() {
-      document.querySelectorAll('th.sortable').forEach(th => {
+      document.querySelectorAll('#view-batches th.sortable').forEach(th => {
         const col = th.dataset.sort;
         const icon = th.querySelector('.sort-icon');
-        if (overviewSortMode === `${col}-asc`) {
+        if (batchesSortMode === `${col}-asc`) {
           icon.textContent = '↑'; th.classList.add('active');
-        } else if (overviewSortMode === `${col}-desc`) {
+        } else if (batchesSortMode === `${col}-desc`) {
           icon.textContent = '↓'; th.classList.add('active');
         } else {
           icon.textContent = '↕'; th.classList.remove('active');
         }
       });
     }
-    document.querySelectorAll('th.sortable').forEach(th => {
+    document.querySelectorAll('#view-batches th.sortable').forEach(th => {
       th.addEventListener('click', () => {
         const col = th.dataset.sort;
-        overviewSortMode = (overviewSortMode === `${col}-asc`) ? `${col}-desc` : `${col}-asc`;
+        batchesSortMode = (batchesSortMode === `${col}-asc`) ? `${col}-desc` : `${col}-asc`;
         updateSortIcons();
-        renderOverview();
+        renderBatches();
       });
     });
     updateSortIcons(); // initial
@@ -835,7 +911,6 @@
         allBatches = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         window.__debug = { allBatches, allIntakeLogs, allDispenseLogs, clearAll: clearAllData };
         console.log('[Snapshot] allBatches 更新，共', allBatches.length, '個 batch');
-        renderOverview();
         renderBatches();
         renderNearExpiry();
         renderWarnBanner();
@@ -872,72 +947,17 @@
       return { class: 'ok', label: `${days}d` };
     }
 
-    function renderOverview() {
-      const tbody = $('tbody-overview');
-      const empty = $('empty-overview');
-      const grouped = new Map();
-      let warnCount = 0, expiredCount = 0;
-
-      for (const b of allBatches) {
-        const status = expiryStatus(b.expiry);
-        if (status.class === 'expired') expiredCount++;
-        else if (status.class === 'danger') warnCount++;
-
-        if (!grouped.has(b.drug)) grouped.set(b.drug, { qty: 0, unit: b.unit || '', expiry: b.expiry, batches: 0, allUnknown: true });
-        const g = grouped.get(b.drug);
-        if (b.quantity != null) {
-          g.qty += Number(b.quantity);
-          g.allUnknown = false;
-        }
-        if (!g.unit && b.unit) g.unit = b.unit;
-        g.batches++;
-        if (b.expiry < g.expiry) g.expiry = b.expiry;
-      }
-
-      $('stat-drugs').textContent = grouped.size;
-      $('stat-warn').textContent = warnCount;
-      $('stat-expired').textContent = expiredCount;
-
-      const searchInput = $('search-overview');
-      const q = (searchInput?.value || '').trim().toLowerCase();
-      let sorted = [...grouped.entries()];
-      switch (overviewSortMode) {
-        case 'expiry-asc':  sorted.sort((a, b) => a[1].expiry.toMillis() - b[1].expiry.toMillis()); break;
-        case 'expiry-desc': sorted.sort((a, b) => b[1].expiry.toMillis() - a[1].expiry.toMillis()); break;
-        case 'drug-asc':    sorted.sort((a, b) => a[0].localeCompare(b[0], 'en', { sensitivity: 'base' })); break;
-        case 'drug-desc':   sorted.sort((a, b) => b[0].localeCompare(a[0], 'en', { sensitivity: 'base' })); break;
-      }
-      if (q) sorted = sorted.filter(([drug]) => drug.toLowerCase().includes(q));
-
-      tbody.innerHTML = '';
-      for (const [drug, g] of sorted) {
-        const status = expiryStatus(g.expiry);
-        const qtyDisplay = g.allUnknown
-          ? '<span style="color:var(--muted)">未盤</span>'
-          : `${g.qty.toLocaleString()}${g.unit ? ` <span class="qty-unit">${g.unit}</span>` : ''}`;
-        tbody.innerHTML += `<tr>
-          <td>${drug}</td>
-          <td class="qty">${qtyDisplay}</td>
-          <td class="expiry">${fmtDate(g.expiry)} <span class="badge ${status.class}">${status.label}</span></td>
-          <td><span class="batch-pill">${g.batches} 批</span></td>
-        </tr>`;
-      }
-      if (grouped.size === 0) {
-        empty.textContent = '尚無資料，請先到「進貨」分頁新增或上傳。';
-        empty.style.display = 'block';
-      } else if (sorted.length === 0) {
-        empty.textContent = `找不到包含「${q}」的藥品。`;
-        empty.style.display = 'block';
-      } else {
-        empty.style.display = 'none';
-      }
-    }
-
     function renderBatches() {
       const tbody = $('tbody-batches');
       const empty = $('empty-batches');
       const q = ($('search-batches')?.value || '').trim().toLowerCase();
-      const list = q ? allBatches.filter(b => (b.drug || '').toLowerCase().includes(q)) : allBatches;
+      let list = q ? allBatches.filter(b => (b.drug || '').toLowerCase().includes(q)) : [...allBatches];
+      switch (batchesSortMode) {
+        case 'expiry-asc':  list.sort((a, b) => a.expiry.toMillis() - b.expiry.toMillis()); break;
+        case 'expiry-desc': list.sort((a, b) => b.expiry.toMillis() - a.expiry.toMillis()); break;
+        case 'drug-asc':    list.sort((a, b) => (a.drug || '').localeCompare(b.drug || '', 'en', { sensitivity: 'base' })); break;
+        case 'drug-desc':   list.sort((a, b) => (b.drug || '').localeCompare(a.drug || '', 'en', { sensitivity: 'base' })); break;
+      }
       tbody.innerHTML = '';
       for (const b of list) {
         const status = expiryStatus(b.expiry);
@@ -1043,12 +1063,17 @@
     function renderWarnBanner() {
       const banner = $('warn-banner');
       const txt = $('warn-banner-text');
+      const drugs = new Set();
       let expired = 0, soon180 = 0;
       for (const b of allBatches) {
+        if (b.drug) drugs.add(b.drug);
         const d = expiryDays(b.expiry);
         if (d < 0) expired++;
         else if (d <= 180) soon180++;
       }
+      $('stat-drugs').textContent = drugs.size;
+      $('stat-warn').textContent = soon180;
+      $('stat-expired').textContent = expired;
       if (expired === 0 && soon180 === 0) {
         banner.style.display = 'none';
         return;
@@ -1166,7 +1191,7 @@
                   : result === 'updated' ? `已更新：${drug}`
                   : `已新增：${drug}`;
         toast(msg);
-        document.querySelector('nav button[data-view="overview"]').click();
+        document.querySelector('nav button[data-view="batches"]').click();
       } catch (err) {
         toast('失敗：' + err.message, true);
       }
@@ -1238,6 +1263,14 @@
           r.oldQuantity = existing.quantity;
           r.oldUnit = existing.unit;
         }
+      } else {
+        // 沒 exact match → 嘗試 fuzzy 找相近候選給使用者勾選
+        const allDrugs = [...new Set(allBatches.map(b => b.drug).filter(Boolean))];
+        const match = fuzzyFindCandidate(drug, allDrugs);
+        if (match) {
+          r.fuzzyCandidate = match.candidate;
+          r.fuzzyReason = match.reason;
+        }
       }
       return r;
     }
@@ -1246,7 +1279,7 @@
       pendingRows = rows;
       const tbody = $('tbody-preview');
       let nNew = 0, nUpd = 0, nDup = 0, nErr = 0;
-      tbody.innerHTML = rows.map(r => {
+      tbody.innerHTML = rows.map((r, idx) => {
         if (r.status === 'new') nNew++;
         else if (r.status === 'update') nUpd++;
         else if (r.status === 'duplicate') nDup++;
@@ -1266,10 +1299,20 @@
         const rowCls = r.status === 'error' ? 'row-error'
                      : r.status === 'update' ? 'row-merge'
                      : r.status === 'duplicate' ? 'row-duplicate'
+                     : r.fuzzyCandidate ? 'row-fuzzy'
                      : '';
+        const fuzzyHtml = r.fuzzyCandidate
+          ? `<div class="fuzzy-suggest">
+              <label>
+                <input type="checkbox" data-action="merge" data-row="${idx}" checked>
+                建議合併到 <strong>${r.fuzzyCandidate}</strong>
+                <span class="muted">（${r.fuzzyReason}）</span>
+              </label>
+            </div>`
+          : '';
         return `<tr class="${rowCls}">
           <td>${badge}${errMsg}</td>
-          <td>${r.drug || '—'}</td>
+          <td>${r.drug || '—'}${fuzzyHtml}</td>
           <td class="qty">${qtyCell}</td>
           <td>${r.unit || '—'}</td>
           <td>${expStr}</td>
@@ -1335,8 +1378,39 @@
     };
 
     $('btn-import').onclick = async () => {
+      // 套用 fuzzy 合併勾選：把使用者勾選的「建議合併」row.drug 改成候選名，再重跑 status
+      const acceptedMerges = new Set();
+      $('tbody-preview').querySelectorAll('input[data-action="merge"]').forEach(cb => {
+        if (cb.checked) acceptedMerges.add(Number(cb.dataset.row));
+      });
+      let appliedMerges = 0;
+      pendingRows.forEach((r, idx) => {
+        if (acceptedMerges.has(idx) && r.fuzzyCandidate) {
+          r.drug = r.fuzzyCandidate;
+          appliedMerges++;
+          // 重新比對 existing batch（drug 換了 → 可能變 update/duplicate）
+          const existing = findExistingBatch(r.drug, r.expiry, r.in_date);
+          if (existing) {
+            if (isSameBatchData(existing, r.quantity, r.unit)) {
+              r.status = 'duplicate';
+            } else {
+              r.status = 'update';
+              r.updateTarget = existing;
+              r.oldQuantity = existing.quantity;
+              r.oldUnit = existing.unit;
+            }
+          } else {
+            r.status = 'new';
+          }
+        }
+      });
+
       const valid = pendingRows.filter(r => r.status === 'new' || r.status === 'update');
-      if (!valid.length) return;
+      if (!valid.length) {
+        toast(appliedMerges > 0 ? `合併後全部變重複（略過），無需匯入` : '沒可匯入的行', appliedMerges === 0);
+        $('btn-cancel').click();
+        return;
+      }
       $('btn-import').disabled = true;
       $('btn-import').textContent = '處理中…';
 
@@ -1438,7 +1512,7 @@
         syncEnabled = wasSyncEnabled;
         scheduleSync();
         $('btn-cancel').click();
-        document.querySelector('nav button[data-view="overview"]').click();
+        document.querySelector('nav button[data-view="batches"]').click();
       }
     };
 
@@ -1568,6 +1642,18 @@
       r.shortfall = sim.shortfall;
       r.dispensed = sim.dispensed;
       if (sim.candidates.length === 0) {
+        // 找不到批次 → 嘗試 fuzzy 找相近藥名建議
+        const allDrugs = [...new Set(allBatches.map(b => b.drug).filter(Boolean))];
+        const match = fuzzyFindCandidate(drug, allDrugs);
+        if (match) {
+          r.fuzzyCandidate = match.candidate;
+          r.fuzzyReason = match.reason;
+          // 模擬一下用候選名出貨會怎樣（給 preview 顯示「合併後可扣 X」）
+          const altSim = simulateDispense(match.candidate, quantity);
+          r.fuzzyAltAvailable = altSim.totalAvailable;
+          r.fuzzyAltUnit = altSim.unit;
+          r.fuzzyAltShortfall = altSim.shortfall;
+        }
         r.status = 'error';
         r.errors.push('找不到可扣的批次');
       } else if (sim.shortfall > 0) {
@@ -1580,7 +1666,7 @@
       pendingDispRows = rows;
       const tbody = $('tbody-disp-preview');
       let nOk = 0, nShort = 0, nErr = 0;
-      tbody.innerHTML = rows.map(r => {
+      tbody.innerHTML = rows.map((r, idx) => {
         if (r.status === 'ok') nOk++;
         else if (r.status === 'short') nShort++;
         else nErr++;
@@ -1591,9 +1677,21 @@
                     : r.status === 'short' ? `<span class="badge warn">短少 ${r.shortfall}</span>`
                     : `<span class="badge expired">錯</span>`;
         const errMsg = r.errors.length ? `<div class="err-msg">${r.errors.join('、')}</div>` : '';
-        return `<tr class="row-${r.status === 'error' ? 'error' : (r.status === 'short' ? 'merge' : '')}">
+        const fuzzyHtml = r.fuzzyCandidate
+          ? `<div class="fuzzy-suggest">
+              <label>
+                <input type="checkbox" data-action="merge" data-row="${idx}" checked>
+                建議改用 <strong>${r.fuzzyCandidate}</strong>
+                <span class="muted">（${r.fuzzyReason}；庫存 ${r.fuzzyAltAvailable ?? 0} ${r.fuzzyAltUnit || ''}）</span>
+              </label>
+            </div>`
+          : '';
+        const rowCls = r.status === 'error' ? (r.fuzzyCandidate ? 'row-fuzzy' : 'row-error')
+                     : r.status === 'short' ? 'row-merge'
+                     : '';
+        return `<tr class="${rowCls}">
           <td>${badge}${errMsg}</td>
-          <td>${r.drug || '—'}</td>
+          <td>${r.drug || '—'}${fuzzyHtml}</td>
           <td class="qty">${r.quantity || '—'}</td>
           <td class="qty">${stockTxt}</td>
           <td>${dStr}</td>
@@ -1603,8 +1701,12 @@
       $('disp-short').textContent = nShort;
       $('disp-err').textContent = nErr;
       $('dispense-preview-area').style.display = 'block';
-      $('btn-disp-import').textContent = `確認出貨 ${nOk + nShort} 筆` + (nErr ? `（跳過 ${nErr} 筆錯誤）` : '');
-      $('btn-disp-import').disabled = (nOk + nShort) === 0;
+      // 「錯」row 若有 fuzzy 候選，使用者可勾選 → commit 時會用候選名走 executeDispense
+      const fuzzyAccepted = rows.filter(r => r.status === 'error' && r.fuzzyCandidate).length;
+      $('btn-disp-import').textContent = `確認出貨 ${nOk + nShort} 筆`
+        + (fuzzyAccepted ? `（+ 最多 ${fuzzyAccepted} 筆建議合併）` : '')
+        + (nErr - fuzzyAccepted > 0 ? `（跳過 ${nErr - fuzzyAccepted} 筆錯誤）` : '');
+      $('btn-disp-import').disabled = (nOk + nShort + fuzzyAccepted) === 0;
     }
 
     function handleDispFile(file) {
@@ -1649,6 +1751,32 @@
     };
 
     $('btn-disp-import').onclick = async () => {
+      // 套用 fuzzy 合併勾選：error 但勾選的把 drug 換成候選名（後續 executeDispense 用新 drug）
+      const acceptedMerges = new Set();
+      $('tbody-disp-preview').querySelectorAll('input[data-action="merge"]').forEach(cb => {
+        if (cb.checked) acceptedMerges.add(Number(cb.dataset.row));
+      });
+      pendingDispRows.forEach((r, idx) => {
+        if (acceptedMerges.has(idx) && r.fuzzyCandidate) {
+          r.drug = r.fuzzyCandidate;
+          // 重跑 simulate 把 status 從 'error' 矯正成 'ok' 或 'short'
+          const sim = simulateDispense(r.drug, r.quantity);
+          r.totalAvailable = sim.totalAvailable;
+          r.unit = sim.unit;
+          r.shortfall = sim.shortfall;
+          r.dispensed = sim.dispensed;
+          if (sim.candidates.length === 0) {
+            // 候選庫存也是 0 → 維持 error
+          } else if (sim.shortfall > 0) {
+            r.status = 'short';
+            r.errors = [];
+          } else {
+            r.status = 'ok';
+            r.errors = [];
+          }
+        }
+      });
+
       const valid = pendingDispRows.filter(r => r.status !== 'error');
       if (!valid.length) return;
       $('btn-disp-import').disabled = true;
@@ -1672,7 +1800,7 @@
       const msg = `出貨 ${ok} 筆${fail ? `，失敗 ${fail}` : ''}${totalShortfall ? `，總短少 ${totalShortfall}` : ''}`;
       toast(msg, fail > 0 || totalShortfall > 0);
       $('btn-disp-cancel').click();
-      document.querySelector('nav button[data-view="overview"]').click();
+      document.querySelector('nav button[data-view="batches"]').click();
     };
 
     function renderRecentIntake() {
