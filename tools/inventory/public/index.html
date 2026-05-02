@@ -58,6 +58,9 @@
       display: flex;
       background: var(--card);
       border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 78px;
+      z-index: 9;
     }
     nav button {
       flex: 1;
@@ -198,6 +201,18 @@
     .upload-zone strong { color: var(--accent); }
     .upload-zone input[type=file] { display: none; }
 
+    .upload-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 24px;
+      align-items: stretch;
+    }
+    .upload-grid > section { display: flex; flex-direction: column; min-width: 0; }
+    .upload-grid > section > .upload-zone { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+    .upload-grid h3 { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
+    @media (max-width: 600px) { .upload-grid { grid-template-columns: 1fr; } }
+
     .toolbar {
       display: flex;
       gap: 8px;
@@ -233,6 +248,20 @@
     .fuzzy-suggest input[type="checkbox"] { margin: 0; cursor: pointer; }
     .fuzzy-suggest .muted { color: var(--muted); font-size: 11px; }
     .stat.dup .num { color: var(--muted); }
+
+    .preview-edit {
+      width: 100%; padding: 4px 6px; font-size: 13px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--line); border-radius: 4px;
+      font-family: inherit;
+    }
+    .preview-edit:focus { outline: none; border-color: var(--accent); }
+    .preview-edit.qty { text-align: right; }
+    .row-delete {
+      background: transparent; color: var(--danger); border: 1px solid var(--line);
+      padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer;
+    }
+    .row-delete:hover { background: rgba(231,76,60,0.1); }
 
     .warn-banner {
       background: linear-gradient(135deg, rgba(231,76,60,0.12), rgba(241,196,15,0.10));
@@ -276,8 +305,8 @@
       .user-info #user-email { display: none; } /* email 隱藏於手機 */
       .user-info button { padding: 6px 10px; font-size: 13px; }
 
-      /* Nav 橫向滑動 */
-      nav { overflow-x: auto; scrollbar-width: none; }
+      /* Nav 橫向滑動 + 手機版 sticky 偏移 */
+      nav { overflow-x: auto; scrollbar-width: none; top: 70px; }
       nav::-webkit-scrollbar { display: none; }
       nav button { flex: 0 0 auto; padding: 11px 16px; white-space: nowrap; font-size: 13px; }
 
@@ -353,6 +382,7 @@
     <nav>
       <button data-view="batches" class="active">批次明細</button>
       <button data-view="warn">⚠️ 近效</button>
+      <button data-view="usage">📊 用量</button>
       <button data-view="intake">進貨</button>
       <button data-view="dispense">出貨</button>
     </nav>
@@ -394,6 +424,38 @@
         <div id="empty-batches" class="empty">尚無批次。</div>
       </section>
 
+      <section id="view-usage" class="view">
+        <p style="color: var(--muted); font-size: 13px; margin-top: 0;">依出貨紀錄計算月平均用量；「撐幾個月」越少越緊急（紅 &lt; 1 / 橘 &lt; 3 / 黃 &lt; 6 / 綠 ≥ 6）。</p>
+        <div style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap;">
+          <label style="font-size: 13px; color: var(--muted); margin: 0;">統計區間</label>
+          <select id="usage-window" style="flex: 0 0 auto; width: auto; padding: 6px 10px; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 6px;">
+            <option value="1">過去 1 個月</option>
+            <option value="3" selected>過去 3 個月</option>
+            <option value="6">過去 6 個月</option>
+            <option value="12">過去 12 個月</option>
+          </select>
+          <input type="search" id="search-usage" placeholder="🔍 搜尋藥品名" autocomplete="off" style="flex: 1; min-width: 160px; margin-bottom: 0;">
+          <button id="btn-export-usage" style="flex: 0 0 auto;">📥 匯出 Excel</button>
+        </div>
+        <div class="summary">
+          <div class="stat"><div class="num" id="stat-usage-drugs">0</div><div class="label">統計藥品數</div></div>
+          <div class="stat danger"><div class="num" id="stat-usage-urgent">0</div><div class="label">&lt; 1 個月</div></div>
+          <div class="stat warn"><div class="num" id="stat-usage-soon">0</div><div class="label">1 ~ 3 個月</div></div>
+        </div>
+        <div class="scroll-x">
+          <table>
+            <thead><tr>
+              <th class="sortable" data-usage-sort="drug">藥品 <span class="sort-icon">↕</span></th>
+              <th class="qty">月平均</th>
+              <th class="qty">目前庫存</th>
+              <th class="sortable" data-usage-sort="months">撐幾個月 <span class="sort-icon">↕</span></th>
+            </tr></thead>
+            <tbody id="tbody-usage"></tbody>
+          </table>
+        </div>
+        <div id="empty-usage" class="empty">沒有出貨紀錄可統計。</div>
+      </section>
+
       <section id="view-intake" class="view">
         <h3 style="margin-top: 0; font-size: 14px; color: var(--muted);">📝 手動進貨（單筆）</h3>
         <form id="form-add">
@@ -424,17 +486,32 @@
           <button type="submit" class="submit-btn">新增批次</button>
         </form>
 
-        <h3 style="margin-top: 24px; font-size: 14px; color: var(--muted);">📊 Excel 批次上傳</h3>
-        <div class="toolbar">
-          <button id="btn-template">📥 下載範本</button>
-        </div>
+        <div class="upload-grid">
+          <section>
+            <h3>📷 拍照辨識（Gemini AI）</h3>
+            <div class="upload-zone" style="cursor: default;">
+              <div style="font-size: 32px;">📸</div>
+              <p style="margin: 0 0 12px;">AI 自動辨識藥名 / 數量 / 效期，下方預覽可手動修正後再匯入。</p>
+              <div style="display: flex; gap: 8px; max-width: 420px; margin: 0 auto;">
+                <label for="ocr-camera" class="submit-btn" style="flex: 1; cursor: pointer; text-align: center; margin: 0;">📸 拍照</label>
+                <label for="ocr-file" class="submit-btn" style="flex: 1; cursor: pointer; text-align: center; margin: 0;">🖼️ 選擇圖片</label>
+              </div>
+              <input type="file" id="ocr-camera" accept="image/*" capture="environment">
+              <input type="file" id="ocr-file" accept="image/*">
+            </div>
+            <div id="ocr-status" style="display:none; padding:10px; background:var(--card); border-radius:6px; margin-top:8px; font-size:13px; color:var(--muted);"></div>
+          </section>
 
-        <label for="file-input" class="upload-zone" id="upload-zone">
-          <div style="font-size: 32px;">📤</div>
-          <div><strong>點此選檔</strong>或拖放 Excel</div>
-          <p>支援 .xlsx / .xls / .csv — 必填欄位：<strong>藥品 / 效期</strong>；數量、單位、進貨日期可空</p>
-          <input type="file" id="file-input" accept=".xlsx,.xls,.csv">
-        </label>
+          <section>
+            <h3>📊 Excel 批次上傳</h3>
+            <label for="file-input" class="upload-zone" id="upload-zone">
+              <div style="font-size: 32px;">📤</div>
+              <div><strong>點此選檔</strong>或拖放 Excel</div>
+              <p>支援 .xlsx / .xls / .csv — 必填欄位：<strong>藥品 / 效期</strong>；數量、單位、進貨日期可空</p>
+              <input type="file" id="file-input" accept=".xlsx,.xls,.csv">
+            </label>
+          </section>
+        </div>
 
         <div id="preview-area" style="display: none; margin-top: 16px;">
           <div class="preview-summary" style="grid-template-columns: repeat(4, 1fr);">
@@ -446,7 +523,7 @@
 
           <div class="scroll-x">
             <table>
-              <thead><tr><th>狀態</th><th>藥品</th><th class="qty">數量</th><th>單位</th><th>效期</th><th>進貨日</th></tr></thead>
+              <thead><tr><th>狀態</th><th style="min-width:160px;">藥品</th><th class="qty" style="min-width:80px;">數量</th><th style="min-width:60px;">單位</th><th style="min-width:130px;">效期</th><th style="min-width:130px;">進貨日</th><th></th></tr></thead>
               <tbody id="tbody-preview"></tbody>
             </table>
           </div>
@@ -485,17 +562,32 @@
           <button type="submit" class="submit-btn">出貨（FIFO 自動扣帳）</button>
         </form>
 
-        <h3 style="margin-top: 24px; font-size: 14px; color: var(--muted);">📊 Excel 上傳出貨清單</h3>
-        <div class="toolbar">
-          <button id="btn-dispense-template">📥 下載範本</button>
-          <span style="flex: 1;"></span>
+        <div class="upload-grid">
+          <section>
+            <h3>📷 拍照辨識（Gemini AI）</h3>
+            <div class="upload-zone" style="cursor: default;">
+              <div style="font-size: 32px;">📸</div>
+              <p style="margin: 0 0 12px;">AI 自動辨識藥名 / 數量，下方預覽可手動修正後再扣帳。</p>
+              <div style="display: flex; gap: 8px; max-width: 420px; margin: 0 auto;">
+                <label for="ocr-disp-camera" class="submit-btn" style="flex: 1; cursor: pointer; text-align: center; margin: 0;">📸 拍照</label>
+                <label for="ocr-disp-file" class="submit-btn" style="flex: 1; cursor: pointer; text-align: center; margin: 0;">🖼️ 選擇圖片</label>
+              </div>
+              <input type="file" id="ocr-disp-camera" accept="image/*" capture="environment">
+              <input type="file" id="ocr-disp-file" accept="image/*">
+            </div>
+            <div id="ocr-disp-status" style="display:none; padding:10px; background:var(--card); border-radius:6px; margin-top:8px; font-size:13px; color:var(--muted);"></div>
+          </section>
+
+          <section>
+            <h3>📊 Excel 上傳出貨清單</h3>
+            <label for="file-dispense" class="upload-zone" id="dispense-zone">
+              <div style="font-size: 32px;">📤</div>
+              <div><strong>點此選檔</strong>或拖放 Excel</div>
+              <p>必填欄位：<strong>藥品 / 數量</strong>；出貨日期可空（預設今天）</p>
+              <input type="file" id="file-dispense" accept=".xlsx,.xls,.csv">
+            </label>
+          </section>
         </div>
-        <label for="file-dispense" class="upload-zone" id="dispense-zone">
-          <div style="font-size: 32px;">📤</div>
-          <div><strong>點此選檔</strong>或拖放 Excel</div>
-          <p>必填欄位：<strong>藥品 / 數量</strong>；出貨日期可空（預設今天）</p>
-          <input type="file" id="file-dispense" accept=".xlsx,.xls,.csv">
-        </label>
 
         <div id="dispense-preview-area" style="display: none; margin-top: 16px;">
           <div class="preview-summary">
@@ -505,7 +597,7 @@
           </div>
           <div class="scroll-x">
             <table>
-              <thead><tr><th>狀態</th><th>藥品</th><th class="qty">申請</th><th class="qty">庫存</th><th>出貨日</th></tr></thead>
+              <thead><tr><th>狀態</th><th style="min-width:160px;">藥品</th><th class="qty" style="min-width:80px;">申請</th><th class="qty">庫存</th><th style="min-width:130px;">出貨日</th><th></th></tr></thead>
               <tbody id="tbody-disp-preview"></tbody>
             </table>
           </div>
@@ -631,6 +723,7 @@
     let allIntakeLogs = [];
     let allDispenseLogs = [];
     let batchesSortMode = 'expiry-asc';
+    let usageSortMode = 'months-asc';
     let syncSheetId = null;
     let syncTimer = null;
     let isSyncing = false;
@@ -726,6 +819,54 @@
           if (d <= 2 && d < bestDist) { best = c; bestDist = d; }
         }
         if (best) return { candidate: best, reason: `拼字相近（距離 ${bestDist}）` };
+      }
+
+      // Rule 4: 字詞覆蓋率（候選的 token 大多出現在 input → 雜訊長字串對應到簡潔藥名）
+      // 例：input "Ac092911g0 euclidan 50mg 優庫利暖糖衣錠..." 對應 "優庫利暖錠 euclidan 50mg"
+      // 完全 token 匹配 = 1 分；CJK 部分子字串匹配 = 0.7 分（容忍劑型差異「錠 vs 糖衣錠」）
+      const tokenize = (s) => s.toLowerCase()
+        .replace(/[^\w一-鿿]+/g, ' ').trim().split(/\s+/)
+        .filter(t => t.length >= 2);
+      const inputTokens = new Set(tokenize(inputNorm));
+      const inputFlat = inputNorm.toLowerCase().replace(/[^\w一-鿿]/g, '');
+      const tokenScore = (t) => {
+        if (inputTokens.has(t)) return 1;
+        const isCjk = /[一-鿿]/.test(t);
+        if (!isCjk) {
+          // ASCII：t 是任何 input token 的子字串（"5g" ⊂ "5gx144"）
+          if (t.length >= 2) {
+            for (const it of inputTokens) {
+              if (it.length > t.length && it.includes(t)) return 0.7;
+            }
+          }
+          // 長 ASCII (≥4) 再試 flat substring
+          if (t.length >= 4 && inputFlat.includes(t)) return 0.7;
+          return 0;
+        }
+        // CJK：t 的子字串 (≥60% 長度) 是否在 inputFlat
+        const minLen = Math.max(3, Math.ceil(t.length * 0.6));
+        if (t.length < minLen) return 0;
+        for (let n = t.length; n >= minLen; n--) {
+          for (let s = 0; s + n <= t.length; s++) {
+            if (inputFlat.includes(t.slice(s, s + n))) return 0.7;
+          }
+        }
+        return 0;
+      };
+      if (inputTokens.size >= 2) {
+        let bestC = null, bestCoverage = 0;
+        for (const c of candidates) {
+          const cTokens = tokenize(c);
+          if (cTokens.length < 2) continue;
+          let score = 0;
+          for (const t of cTokens) score += tokenScore(t);
+          const coverage = score / cTokens.length;
+          if (coverage >= 0.7 && coverage > bestCoverage) {
+            bestCoverage = coverage;
+            bestC = c;
+          }
+        }
+        if (bestC) return { candidate: bestC, reason: `${Math.round(bestCoverage * 100)}% 字詞符合` };
       }
       return null;
     }
@@ -824,6 +965,59 @@
     // ===== Search =====
     $('search-batches').addEventListener('input', () => renderBatches());
     $('search-warn').addEventListener('input', () => renderNearExpiry());
+    $('search-usage').addEventListener('input', () => renderUsageStats());
+    $('usage-window').addEventListener('change', () => renderUsageStats());
+
+    // 用量匯出 Excel（受目前統計區間 + 搜尋過濾影響）
+    $('btn-export-usage').onclick = () => {
+      const months = Number($('usage-window').value) || 3;
+      const cutoff = Date.now() - months * 30 * 86400000;
+      const usageByDrug = new Map();
+      for (const log of allDispenseLogs) {
+        const t = log.dispense_date?.toMillis?.() ?? log.at?.toMillis?.() ?? 0;
+        if (t < cutoff) continue;
+        const qty = Number(log.quantity_dispensed) || 0;
+        if (!qty) continue;
+        if (!usageByDrug.has(log.drug)) usageByDrug.set(log.drug, { qty: 0, unit: log.unit || '' });
+        const u = usageByDrug.get(log.drug);
+        u.qty += qty;
+        if (!u.unit && log.unit) u.unit = log.unit;
+      }
+      const stockByDrug = new Map();
+      for (const b of allBatches) {
+        if (b.quantity == null) continue;
+        stockByDrug.set(b.drug, (stockByDrug.get(b.drug) || 0) + Number(b.quantity));
+      }
+      const q = ($('search-usage')?.value || '').trim().toLowerCase();
+      const drugs = [...new Set([...usageByDrug.keys(), ...stockByDrug.keys()])]
+        .filter(d => !q || (d || '').toLowerCase().includes(q));
+      const data = drugs.map(drug => {
+        const u = usageByDrug.get(drug);
+        const monthlyAvg = u ? u.qty / months : 0;
+        const stock = stockByDrug.get(drug) || 0;
+        const monthsLeft = monthlyAvg > 0 ? stock / monthlyAvg : null;
+        return { drug, monthlyAvg, stock, monthsLeft, unit: (u && u.unit) || '', totalQty: u ? u.qty : 0 };
+      }).sort((a, b) => (a.monthsLeft ?? Infinity) - (b.monthsLeft ?? Infinity));
+      const rows = [['藥品', `過去 ${months} 個月總出貨`, '月平均', '目前庫存', '單位', '撐幾個月']];
+      for (const r of data) {
+        rows.push([
+          r.drug,
+          r.totalQty,
+          Number(r.monthlyAvg.toFixed(2)),
+          r.stock,
+          r.unit,
+          r.monthsLeft == null ? '未用' : Number(r.monthsLeft.toFixed(1))
+        ]);
+      }
+      if (rows.length === 1) { toast('沒有資料可匯出', true); return; }
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols'] = [{wch:28},{wch:18},{wch:10},{wch:10},{wch:8},{wch:10}];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, `用量_${months}個月`);
+      const today = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, `用量統計_${months}月_${today}.xlsx`);
+      toast(`✅ 已匯出 ${rows.length - 1} 筆`);
+    };
 
     // 近效匯出 Excel（受搜尋過濾影響）
     $('btn-export-warn').onclick = () => {
@@ -880,6 +1074,30 @@
     });
     updateSortIcons(); // initial
 
+    // ===== Column-header sort — 用量 =====
+    function updateUsageSortIcons() {
+      document.querySelectorAll('#view-usage th.sortable').forEach(th => {
+        const col = th.dataset.usageSort;
+        const icon = th.querySelector('.sort-icon');
+        if (usageSortMode === `${col}-asc`) {
+          icon.textContent = '↑'; th.classList.add('active');
+        } else if (usageSortMode === `${col}-desc`) {
+          icon.textContent = '↓'; th.classList.add('active');
+        } else {
+          icon.textContent = '↕'; th.classList.remove('active');
+        }
+      });
+    }
+    document.querySelectorAll('#view-usage th.sortable').forEach(th => {
+      th.addEventListener('click', () => {
+        const col = th.dataset.usageSort;
+        usageSortMode = (usageSortMode === `${col}-asc`) ? `${col}-desc` : `${col}-asc`;
+        updateUsageSortIcons();
+        renderUsageStats();
+      });
+    });
+    updateUsageSortIcons();
+
     // ===== Banner click → jump to warn tab =====
     $('warn-banner').addEventListener('click', () => {
       document.querySelector('nav button[data-view="warn"]').click();
@@ -914,6 +1132,7 @@
         renderBatches();
         renderNearExpiry();
         renderWarnBanner();
+        renderUsageStats();
         renderDrugDatalist();
         scheduleSync();
       }, (err) => toast('讀取失敗：' + err.message, true));
@@ -927,6 +1146,7 @@
       onSnapshot(query(collection(db, 'dispense_logs'), orderBy('at', 'desc')), (snap) => {
         allDispenseLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         renderRecentDispense();
+        renderUsageStats();
         scheduleSync();
       }, () => {});
     }
@@ -1031,6 +1251,7 @@
             <td class="qty">${qty}</td>
             <td class="expiry">${fmtDate(b.expiry)}</td>
             <td>${dStr}</td>
+            <td><button class="delete-btn" data-id="${b.id}">刪</button></td>
           </tr>`;
         }).join('');
 
@@ -1042,18 +1263,117 @@
             </div>
             <div class="scroll-x">
               <table>
-                <thead><tr><th>藥品</th><th class="qty">數量</th><th>效期</th><th>距效期</th></tr></thead>
+                <thead><tr><th>藥品</th><th class="qty">數量</th><th>效期</th><th>距效期</th><th></th></tr></thead>
                 <tbody>${rows}</tbody>
               </table>
             </div>
           </div>`;
       }
 
+      container.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.onclick = async () => {
+          if (!confirm('確定刪除這個批次？')) return;
+          try {
+            await deleteDoc(doc(db, 'batches', btn.dataset.id));
+            toast('已刪除');
+          } catch (e) {
+            toast('刪除失敗：' + e.message, true);
+          }
+        };
+      });
+
       const empty = $('empty-warn');
       if (totalShown === 0) {
         empty.textContent = q
           ? `找不到包含「${q}」的近效藥品。`
           : '沒有近效或已過期的藥品 🎉';
+        empty.style.display = 'block';
+      } else {
+        empty.style.display = 'none';
+      }
+    }
+
+    // ===== 月平均用量統計 =====
+    function renderUsageStats() {
+      const months = Number($('usage-window').value) || 3;
+      const cutoff = Date.now() - months * 30 * 86400000;
+
+      // dispense_logs 聚合：drug → { totalQty, unit }
+      const usageByDrug = new Map();
+      for (const log of allDispenseLogs) {
+        const t = log.dispense_date?.toMillis?.() ?? log.at?.toMillis?.() ?? 0;
+        if (t < cutoff) continue;
+        const qty = Number(log.quantity_dispensed) || 0;
+        if (!qty) continue;
+        if (!usageByDrug.has(log.drug)) usageByDrug.set(log.drug, { qty: 0, unit: log.unit || '' });
+        const u = usageByDrug.get(log.drug);
+        u.qty += qty;
+        if (!u.unit && log.unit) u.unit = log.unit;
+      }
+
+      // batches 聚合當前庫存：drug → totalQty
+      const stockByDrug = new Map();
+      for (const b of allBatches) {
+        if (b.quantity == null) continue;
+        const cur = stockByDrug.get(b.drug) || 0;
+        stockByDrug.set(b.drug, cur + Number(b.quantity));
+      }
+
+      // 收齊所有出現過的藥（出貨歷史 + 仍在庫的）
+      const drugs = new Set([...usageByDrug.keys(), ...stockByDrug.keys()]);
+      const rows = [];
+      for (const drug of drugs) {
+        const u = usageByDrug.get(drug);
+        const monthlyAvg = u ? u.qty / months : 0;
+        const stock = stockByDrug.get(drug) || 0;
+        const monthsLeft = monthlyAvg > 0 ? stock / monthlyAvg : Infinity;
+        const unit = (u && u.unit) || '';
+        rows.push({ drug, monthlyAvg, stock, monthsLeft, unit });
+      }
+      switch (usageSortMode) {
+        case 'months-asc':  rows.sort((a, b) => a.monthsLeft - b.monthsLeft); break;
+        case 'months-desc': rows.sort((a, b) => b.monthsLeft - a.monthsLeft); break;
+        case 'drug-asc':    rows.sort((a, b) => (a.drug || '').localeCompare(b.drug || '', 'en', { sensitivity: 'base' })); break;
+        case 'drug-desc':   rows.sort((a, b) => (b.drug || '').localeCompare(a.drug || '', 'en', { sensitivity: 'base' })); break;
+      }
+
+      const q = ($('search-usage')?.value || '').trim().toLowerCase();
+      const filtered = q ? rows.filter(r => (r.drug || '').toLowerCase().includes(q)) : rows;
+
+      let urgent = 0, soon = 0;
+      for (const r of rows) {
+        if (r.monthsLeft < 1) urgent++;
+        else if (r.monthsLeft < 3) soon++;
+      }
+      $('stat-usage-drugs').textContent = rows.length;
+      $('stat-usage-urgent').textContent = urgent;
+      $('stat-usage-soon').textContent = soon;
+
+      const tbody = $('tbody-usage');
+      const empty = $('empty-usage');
+      tbody.innerHTML = filtered.map(r => {
+        const cls = r.monthsLeft < 1 ? 'expired' : r.monthsLeft < 3 ? 'danger' : r.monthsLeft < 6 ? 'warn' : 'ok';
+        const monthsStr = !isFinite(r.monthsLeft)
+          ? '<span style="color:var(--muted)">— 未用</span>'
+          : r.monthsLeft >= 99
+            ? '99+ 個月'
+            : `${r.monthsLeft.toFixed(1)} 個月`;
+        const avgStr = r.monthlyAvg > 0
+          ? `${r.monthlyAvg.toFixed(1)} ${r.unit}`
+          : '<span style="color:var(--muted)">—</span>';
+        return `<tr>
+          <td>${r.drug}</td>
+          <td class="qty">${avgStr}</td>
+          <td class="qty">${r.stock.toLocaleString()} ${r.unit}</td>
+          <td><span class="badge ${cls}">${monthsStr}</span></td>
+        </tr>`;
+      }).join('');
+
+      if (rows.length === 0) {
+        empty.textContent = '沒有出貨紀錄可統計。';
+        empty.style.display = 'block';
+      } else if (filtered.length === 0) {
+        empty.textContent = `找不到包含「${q}」的藥品。`;
         empty.style.display = 'block';
       } else {
         empty.style.display = 'none';
@@ -1198,20 +1518,6 @@
     };
 
     // ===== Excel template download =====
-    $('btn-template').onclick = () => {
-      const data = [
-        ['藥品', '數量', '單位', '效期', '進貨日期'],
-        ['Augmentin Sol 475mg/5ml', 70, '瓶', '2026-04-30', '2025-12-18'],
-        ['Lipitor 10mg', 100, '顆', '2027-06-30', ''],
-        ['Mocalm', 1, '盒', '2026-04-30', '']
-      ];
-      const ws = XLSX.utils.aoa_to_sheet(data);
-      ws['!cols'] = [{ wch: 28 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 12 }];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, '進貨清單');
-      XLSX.writeFile(wb, '進貨範本.xlsx');
-    };
-
     // ===== Excel upload =====
     let pendingRows = [];
 
@@ -1310,13 +1616,16 @@
               </label>
             </div>`
           : '';
+        const expVal = r.expiry ? expiryKeyFromDate(r.expiry) : '';
+        const inVal = r.in_date ? expiryKeyFromDate(r.in_date) : '';
         return `<tr class="${rowCls}">
           <td>${badge}${errMsg}</td>
-          <td>${r.drug || '—'}${fuzzyHtml}</td>
-          <td class="qty">${qtyCell}</td>
-          <td>${r.unit || '—'}</td>
-          <td>${expStr}</td>
-          <td>${inStr}</td>
+          <td><input class="preview-edit" data-row="${idx}" data-field="drug" value="${(r.drug || '').replace(/"/g, '&quot;')}" placeholder="藥品名">${fuzzyHtml}</td>
+          <td><input class="preview-edit qty" type="number" step="0.01" data-row="${idx}" data-field="quantity" value="${r.quantity ?? ''}" placeholder="未盤"></td>
+          <td><input class="preview-edit" data-row="${idx}" data-field="unit" value="${(r.unit || '').replace(/"/g, '&quot;')}" list="unit-list" placeholder="—"></td>
+          <td><input class="preview-edit" type="date" data-row="${idx}" data-field="expiry" value="${expVal}"></td>
+          <td><input class="preview-edit" type="date" data-row="${idx}" data-field="in_date" value="${inVal}"></td>
+          <td><button class="row-delete" data-row="${idx}" title="刪除這列">✕</button></td>
         </tr>`;
       }).join('');
       $('prev-new').textContent = nNew;
@@ -1332,6 +1641,62 @@
         + (skipParts.length ? `（跳過 ${skipParts.join(' + ')}）` : '');
       $('btn-import').disabled = importable === 0;
     }
+
+    // ===== Preview 編輯：使用者直接改欄位 → 重跑 status =====
+    function revalidatePendingRow(idx) {
+      const r = pendingRows[idx];
+      r.errors = [];
+      if (!r.drug) r.errors.push('缺藥品');
+      if (r.quantity != null && isNaN(r.quantity)) r.errors.push('數量格式錯');
+      if (!r.expiry) r.errors.push('效期無效');
+      r.fuzzyCandidate = null;
+      r.fuzzyReason = null;
+      r.updateTarget = null;
+      r.oldQuantity = undefined;
+      r.oldUnit = undefined;
+      if (r.errors.length) { r.status = 'error'; return; }
+      const existing = findExistingBatch(r.drug, r.expiry, r.in_date);
+      if (existing) {
+        if (isSameBatchData(existing, r.quantity, r.unit)) {
+          r.status = 'duplicate';
+        } else {
+          r.status = 'update';
+          r.updateTarget = existing;
+          r.oldQuantity = existing.quantity;
+          r.oldUnit = existing.unit;
+        }
+      } else {
+        r.status = 'new';
+      }
+    }
+
+    $('tbody-preview').addEventListener('change', (e) => {
+      const inp = e.target;
+      if (!inp.matches('input.preview-edit')) return;
+      const idx = Number(inp.dataset.row);
+      const field = inp.dataset.field;
+      const r = pendingRows[idx];
+      if (!r) return;
+      if (field === 'quantity') {
+        r.quantity = inp.value === '' ? null : Number(inp.value);
+      } else if (field === 'expiry' || field === 'in_date') {
+        r[field] = inp.value ? new Date(inp.value + 'T00:00:00') : null;
+      } else if (field === 'drug') {
+        r.drug = normalizeDrugName(inp.value);
+      } else {
+        r[field] = (inp.value || '').trim();
+      }
+      revalidatePendingRow(idx);
+      renderPreview(pendingRows);
+    });
+
+    $('tbody-preview').addEventListener('click', (e) => {
+      const btn = e.target.closest('.row-delete');
+      if (!btn) return;
+      const idx = Number(btn.dataset.row);
+      pendingRows.splice(idx, 1);
+      renderPreview(pendingRows);
+    });
 
     function handleFile(file) {
       const reader = new FileReader();
@@ -1356,6 +1721,100 @@
       };
       reader.readAsArrayBuffer(file);
     }
+
+    // ===== 拍照辨識（Gemini via Cloudflare Worker） =====
+    const OCR_WORKER_URL = 'https://pharmacy-ocr.chc71173.workers.dev';
+
+    async function compressImage(file, maxSide = 1600, quality = 0.85) {
+      const img = await new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const i = new Image();
+        i.onload = () => { URL.revokeObjectURL(url); resolve(i); };
+        i.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+        i.src = url;
+      });
+      let { width, height } = img;
+      if (width > maxSide || height > maxSide) {
+        const scale = maxSide / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', quality));
+      const buf = await blob.arrayBuffer();
+      let binary = '';
+      const bytes = new Uint8Array(buf);
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      return { base64: btoa(binary), mimeType: 'image/jpeg', sizeKB: Math.round(blob.size / 1024) };
+    }
+
+    async function handleOcrPhoto(file) {
+      const status = $('ocr-status');
+      const setStatus = (msg, isErr) => {
+        status.style.display = 'block';
+        status.style.color = isErr ? 'var(--danger)' : 'var(--muted)';
+        status.textContent = msg;
+      };
+      try {
+        if (!auth.currentUser) { setStatus('請先登入', true); return; }
+        setStatus('📐 壓縮影像中…');
+        const { base64, mimeType, sizeKB } = await compressImage(file);
+        setStatus(`☁️ 上傳辨識中…（${sizeKB} KB，平均 5-10 秒）`);
+        const idToken = await auth.currentUser.getIdToken();
+        const resp = await fetch(OCR_WORKER_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
+          },
+          body: JSON.stringify({ image: base64, mimeType })
+        });
+        const text = await resp.text();
+        if (!resp.ok) {
+          let msg = text;
+          try { const j = JSON.parse(text); msg = j.error + (j.detail ? ` — ${j.detail.slice(0, 200)}` : ''); } catch {}
+          setStatus(`辨識失敗（${resp.status}）：${msg}`, true);
+          return;
+        }
+        let items;
+        try { items = JSON.parse(text); } catch (e) {
+          setStatus('Gemini 回傳非 JSON：' + text.slice(0, 100), true);
+          return;
+        }
+        if (!Array.isArray(items) || items.length === 0) {
+          setStatus('辨識結果為空 — 試試光線更好/角度更正的照片', true);
+          return;
+        }
+        // 轉成 validateRow 認得的 row 格式（進貨日預設今天，使用者可在預覽手動改）
+        const today = new Date().toISOString().slice(0, 10);
+        const rows = items.map((it, idx) => {
+          const row = {
+            '藥品': it.drug || '',
+            '數量': it.quantity ?? '',
+            '單位': it.unit || '',
+            '效期': it.expiry || '',
+            '進貨日期': today
+          };
+          return validateRow(row, idx);
+        });
+        renderPreview(rows);
+        setStatus(`✅ 辨識出 ${items.length} 筆，請於下方預覽確認`);
+      } catch (e) {
+        console.error('[OCR] error:', e);
+        setStatus('辨識失敗：' + (e.message || String(e)), true);
+      }
+    }
+
+    ['ocr-camera', 'ocr-file'].forEach(id => {
+      $(id).onchange = (e) => {
+        if (e.target.files[0]) {
+          handleOcrPhoto(e.target.files[0]);
+          e.target.value = ''; // 同張照片可重選
+        }
+      };
+    });
 
     const uploadZone = $('upload-zone');
     const fileInput = $('file-input');
@@ -1444,6 +1903,7 @@
               unit: r.unit,
               expiry: Timestamp.fromDate(r.expiry),
               in_date: r.in_date ? Timestamp.fromDate(r.in_date) : null,
+              ...(r.lot ? { lot: r.lot } : {}),
               created_at: serverTimestamp(),
               created_by: userEmail
             }
@@ -1455,6 +1915,7 @@
               drug: r.drug, quantity: r.quantity, unit: r.unit,
               expiry: Timestamp.fromDate(r.expiry),
               in_date: r.in_date ? Timestamp.fromDate(r.in_date) : null,
+              ...(r.lot ? { lot: r.lot } : {}),
               action: 'added',
               at: serverTimestamp(), by: userEmail
             }
@@ -1467,6 +1928,7 @@
             data: {
               quantity: r.quantity,
               unit: r.unit,
+              ...(r.lot ? { lot: r.lot } : {}),
               last_updated_at: serverTimestamp(),
               last_updated_by: userEmail
             }
@@ -1478,6 +1940,7 @@
               drug: r.drug, quantity: r.quantity, unit: r.unit,
               expiry: Timestamp.fromDate(r.expiry),
               in_date: r.in_date ? Timestamp.fromDate(r.in_date) : null,
+              ...(r.lot ? { lot: r.lot } : {}),
               action: 'updated',
               at: serverTimestamp(), by: userEmail
             }
@@ -1606,20 +2069,6 @@
 
     // 「清空全部」按鈕已從 UI 移除，改用 ?danger=1 URL flag 觸發（見檔案末尾）
 
-    // 出貨範本下載
-    $('btn-dispense-template').onclick = () => {
-      const data = [
-        ['藥品', '數量', '出貨日期'],
-        ['Augmentin Sol 475mg/5ml', 5, ''],
-        ['Lipitor 10mg', 14, '2026-04-27']
-      ];
-      const ws = XLSX.utils.aoa_to_sheet(data);
-      ws['!cols'] = [{ wch: 28 }, { wch: 8 }, { wch: 12 }];
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, '出貨清單');
-      XLSX.writeFile(wb, '出貨範本.xlsx');
-    };
-
     // 出貨 Excel 上傳
     let pendingDispRows = [];
 
@@ -1689,12 +2138,14 @@
         const rowCls = r.status === 'error' ? (r.fuzzyCandidate ? 'row-fuzzy' : 'row-error')
                      : r.status === 'short' ? 'row-merge'
                      : '';
+        const dVal = r.dispense_date ? expiryKeyFromDate(r.dispense_date) : '';
         return `<tr class="${rowCls}">
           <td>${badge}${errMsg}</td>
-          <td>${r.drug || '—'}${fuzzyHtml}</td>
-          <td class="qty">${r.quantity || '—'}</td>
+          <td><input class="preview-edit" data-row="${idx}" data-field="drug" value="${(r.drug || '').replace(/"/g, '&quot;')}" placeholder="藥品名">${fuzzyHtml}</td>
+          <td><input class="preview-edit qty" type="number" step="0.01" data-row="${idx}" data-field="quantity" value="${r.quantity ?? ''}"></td>
           <td class="qty">${stockTxt}</td>
-          <td>${dStr}</td>
+          <td><input class="preview-edit" type="date" data-row="${idx}" data-field="dispense_date" value="${dVal}"></td>
+          <td><button class="row-delete" data-row="${idx}" title="刪除這列">✕</button></td>
         </tr>`;
       }).join('');
       $('disp-ok').textContent = nOk;
@@ -1708,6 +2159,133 @@
         + (nErr - fuzzyAccepted > 0 ? `（跳過 ${nErr - fuzzyAccepted} 筆錯誤）` : '');
       $('btn-disp-import').disabled = (nOk + nShort + fuzzyAccepted) === 0;
     }
+
+    // 出貨 preview 編輯：使用者直接改欄位 → 重跑 simulate
+    function revalidateDispPendingRow(idx) {
+      const r = pendingDispRows[idx];
+      r.errors = [];
+      r.fuzzyCandidate = null;
+      r.fuzzyReason = null;
+      if (!r.drug) r.errors.push('缺藥品');
+      if (r.quantity == null || isNaN(r.quantity) || r.quantity <= 0) r.errors.push('數量無效');
+      if (r.errors.length) { r.status = 'error'; return; }
+      const sim = simulateDispense(r.drug, r.quantity);
+      r.totalAvailable = sim.totalAvailable;
+      r.unit = sim.unit;
+      r.shortfall = sim.shortfall;
+      r.dispensed = sim.dispensed;
+      if (sim.candidates.length === 0) {
+        const allDrugs = [...new Set(allBatches.map(b => b.drug).filter(Boolean))];
+        const match = fuzzyFindCandidate(r.drug, allDrugs);
+        if (match) {
+          r.fuzzyCandidate = match.candidate;
+          r.fuzzyReason = match.reason;
+          const altSim = simulateDispense(match.candidate, r.quantity);
+          r.fuzzyAltAvailable = altSim.totalAvailable;
+          r.fuzzyAltUnit = altSim.unit;
+          r.fuzzyAltShortfall = altSim.shortfall;
+        }
+        r.status = 'error';
+        r.errors.push('找不到可扣的批次');
+      } else if (sim.shortfall > 0) {
+        r.status = 'short';
+      } else {
+        r.status = 'ok';
+      }
+    }
+
+    $('tbody-disp-preview').addEventListener('change', (e) => {
+      const inp = e.target;
+      if (!inp.matches('input.preview-edit')) return;
+      const idx = Number(inp.dataset.row);
+      const field = inp.dataset.field;
+      const r = pendingDispRows[idx];
+      if (!r) return;
+      if (field === 'quantity') {
+        r.quantity = inp.value === '' ? null : Number(inp.value);
+      } else if (field === 'dispense_date') {
+        r.dispense_date = inp.value ? new Date(inp.value + 'T00:00:00') : new Date();
+      } else if (field === 'drug') {
+        r.drug = normalizeDrugName(inp.value);
+      } else {
+        r[field] = (inp.value || '').trim();
+      }
+      revalidateDispPendingRow(idx);
+      renderDispPreview(pendingDispRows);
+    });
+
+    $('tbody-disp-preview').addEventListener('click', (e) => {
+      const btn = e.target.closest('.row-delete');
+      if (!btn) return;
+      const idx = Number(btn.dataset.row);
+      pendingDispRows.splice(idx, 1);
+      renderDispPreview(pendingDispRows);
+    });
+
+    // 出貨：拍照辨識
+    async function handleOcrDispPhoto(file) {
+      const status = $('ocr-disp-status');
+      const setStatus = (msg, isErr) => {
+        status.style.display = 'block';
+        status.style.color = isErr ? 'var(--danger)' : 'var(--muted)';
+        status.textContent = msg;
+      };
+      try {
+        if (!auth.currentUser) { setStatus('請先登入', true); return; }
+        setStatus('📐 壓縮影像中…');
+        const { base64, mimeType, sizeKB } = await compressImage(file);
+        setStatus(`☁️ 上傳辨識中…（${sizeKB} KB，平均 5-10 秒）`);
+        const idToken = await auth.currentUser.getIdToken();
+        const resp = await fetch(OCR_WORKER_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${idToken}` },
+          body: JSON.stringify({ image: base64, mimeType })
+        });
+        const text = await resp.text();
+        if (!resp.ok) {
+          let msg = text;
+          try { const j = JSON.parse(text); msg = j.error + (j.detail ? ` — ${j.detail.slice(0, 200)}` : ''); } catch {}
+          setStatus(`辨識失敗（${resp.status}）：${msg}`, true);
+          return;
+        }
+        let items;
+        try { items = JSON.parse(text); } catch (e) {
+          setStatus('Gemini 回傳非 JSON：' + text.slice(0, 100), true);
+          return;
+        }
+        if (!Array.isArray(items) || items.length === 0) {
+          setStatus('辨識結果為空 — 試試光線更好/角度更正的照片', true);
+          return;
+        }
+        // 出貨只取 drug + quantity，出貨日預設今天
+        const today = new Date().toISOString().slice(0, 10);
+        const rows = items
+          .filter(it => it.drug && it.quantity)
+          .map((it, idx) => validateDispRow({
+            '藥品': it.drug,
+            '數量': it.quantity,
+            '出貨日期': today
+          }, idx));
+        if (!rows.length) {
+          setStatus('辨識出來但缺藥名/數量 — 換張清楚照片重試', true);
+          return;
+        }
+        renderDispPreview(rows);
+        setStatus(`✅ 辨識出 ${rows.length} 筆，請於下方預覽確認（出貨日預設今天）`);
+      } catch (e) {
+        console.error('[OCR-disp] error:', e);
+        setStatus('辨識失敗：' + (e.message || String(e)), true);
+      }
+    }
+
+    ['ocr-disp-camera', 'ocr-disp-file'].forEach(id => {
+      $(id).onchange = (e) => {
+        if (e.target.files[0]) {
+          handleOcrDispPhoto(e.target.files[0]);
+          e.target.value = '';
+        }
+      };
+    });
 
     function handleDispFile(file) {
       const reader = new FileReader();
