@@ -1552,15 +1552,22 @@
       if (!expiry) errors.push('效期無效');
 
       const r = { rowNum: idx + 2, drug, quantity, unit, expiry, in_date, errors, status: 'new' };
+
+      // 即便 error 也跑 fuzzy（讓使用者看到合併建議；補完缺漏欄位後勾選的 fuzzy 仍會套用）
+      if (drug) {
+        const allDrugs = [...new Set(allBatches.map(b => b.drug).filter(Boolean))];
+        const match = fuzzyFindCandidate(drug, allDrugs);
+        if (match) {
+          r.fuzzyCandidate = match.candidate;
+          r.fuzzyReason = match.reason;
+        }
+      }
+
       if (errors.length) { r.status = 'error'; return r; }
 
       // 唯一鍵 (drug + expiry + in_date) 比對既有 batch
       const existing = findExistingBatch(drug, expiry, in_date);
       if (existing) {
-        console.log('[Dedup] 第', idx + 2, '行匹配既有 batch：',
-          { row: { drug, expiry, in_date, quantity, unit } },
-          { batch: { id: existing.id, drug: existing.drug, expiry: existing.expiry?.toDate?.(), in_date: existing.in_date?.toDate?.(), quantity: existing.quantity, unit: existing.unit } }
-        );
         if (isSameBatchData(existing, quantity, unit)) {
           r.status = 'duplicate';
         } else {
@@ -1569,14 +1576,8 @@
           r.oldQuantity = existing.quantity;
           r.oldUnit = existing.unit;
         }
-      } else {
-        // 沒 exact match → 嘗試 fuzzy 找相近候選給使用者勾選
-        const allDrugs = [...new Set(allBatches.map(b => b.drug).filter(Boolean))];
-        const match = fuzzyFindCandidate(drug, allDrugs);
-        if (match) {
-          r.fuzzyCandidate = match.candidate;
-          r.fuzzyReason = match.reason;
-        }
+        r.fuzzyCandidate = null; // exact match → 不用 fuzzy
+        r.fuzzyReason = null;
       }
       return r;
     }
@@ -1654,6 +1655,17 @@
       r.updateTarget = null;
       r.oldQuantity = undefined;
       r.oldUnit = undefined;
+
+      // 即便 error 也跑 fuzzy
+      if (r.drug) {
+        const allDrugs = [...new Set(allBatches.map(b => b.drug).filter(Boolean))];
+        const match = fuzzyFindCandidate(r.drug, allDrugs);
+        if (match) {
+          r.fuzzyCandidate = match.candidate;
+          r.fuzzyReason = match.reason;
+        }
+      }
+
       if (r.errors.length) { r.status = 'error'; return; }
       const existing = findExistingBatch(r.drug, r.expiry, r.in_date);
       if (existing) {
@@ -1665,6 +1677,8 @@
           r.oldQuantity = existing.quantity;
           r.oldUnit = existing.unit;
         }
+        r.fuzzyCandidate = null;
+        r.fuzzyReason = null;
       } else {
         r.status = 'new';
       }
