@@ -1014,7 +1014,7 @@
       ws['!cols'] = [{wch:28},{wch:18},{wch:10},{wch:10},{wch:8},{wch:10}];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, `用量_${months}個月`);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = expiryKeyFromDate(new Date());
       XLSX.writeFile(wb, `用量統計_${months}月_${today}.xlsx`);
       toast(`✅ 已匯出 ${rows.length - 1} 筆`);
     };
@@ -1045,7 +1045,7 @@
       ws['!cols'] = [{wch:14},{wch:28},{wch:8},{wch:8},{wch:12},{wch:12},{wch:10}];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, '近效藥品');
-      const today = new Date().toISOString().slice(0, 10);
+      const today = expiryKeyFromDate(new Date());
       XLSX.writeFile(wb, `近效藥品_${today}.xlsx`);
       toast(`✅ 已匯出 ${rows.length - 1} 筆`);
     };
@@ -1154,7 +1154,7 @@
     function fmtDate(ts) {
       if (!ts) return '—';
       const d = ts.toDate ? ts.toDate() : new Date(ts);
-      return d.toISOString().slice(0, 10);
+      return isNaN(d) ? '—' : expiryKeyFromDate(d);
     }
 
     function expiryStatus(ts) {
@@ -1802,7 +1802,7 @@
           return;
         }
         // 轉成 validateRow 認得的 row 格式（進貨日預設今天，使用者可在預覽手動改）
-        const today = new Date().toISOString().slice(0, 10);
+        const today = expiryKeyFromDate(new Date());
         const rows = items.map((it, idx) => {
           const row = {
             '藥品': it.drug || '',
@@ -2272,7 +2272,7 @@
           return;
         }
         // 出貨只取 drug + quantity，出貨日預設今天
-        const today = new Date().toISOString().slice(0, 10);
+        const today = expiryKeyFromDate(new Date());
         const rows = items
           .filter(it => it.drug && it.quantity)
           .map((it, idx) => validateDispRow({
@@ -2546,7 +2546,7 @@
     function fmtDateOrEmpty(ts) {
       if (!ts) return '';
       const d = ts.toDate ? ts.toDate() : new Date(ts);
-      return isNaN(d) ? '' : d.toISOString().slice(0, 10);
+      return isNaN(d) ? '' : expiryKeyFromDate(d);
     }
 
     function buildInventoryRows() {
